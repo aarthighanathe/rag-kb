@@ -1,0 +1,27 @@
+#!/bin/sh
+# Husky pre-commit hook
+# Runs on every git commit: lint → format → type-check → unit tests
+# All steps must pass or the commit is aborted.
+
+set -e
+
+echo "🔍 Running pre-commit checks..."
+
+# 1. ESLint with auto-fix on staged backend files
+echo "\n→ ESLint..."
+cd backend && npx lint-staged --config ../package.json
+cd ..
+
+# 2. Type-check (no emit — just verify types)
+echo "\n→ Type-check..."
+cd backend && npm run type-check
+cd ..
+
+# 3. Unit tests only (fast — lint, type-check, complexity-audit, unit tests,
+#    and integration tests all run again in CI on every PR against main;
+#    see .github/workflows/ci.yml)
+echo "\n→ Unit tests..."
+cd backend && npm run test:unit
+cd ..
+
+echo "\n✅ All pre-commit checks passed."

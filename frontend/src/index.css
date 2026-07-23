@@ -1,0 +1,511 @@
+/**
+ * @file index.css
+ * @description Global stylesheet — Ink-and-Paper theme v2. Clean flat surfaces,
+ *   sharp focus rings, structural color utilities, status badges, panel classes.
+ * @updated 2026-06-23
+ */
+
+/* ============================================================================
+   FONTS
+   ============================================================================ */
+
+@import '@fontsource-variable/fraunces';
+@import '@fontsource-variable/fraunces/wght-italic.css';
+@import '@fontsource/space-grotesk/400.css';
+@import '@fontsource/space-grotesk/500.css';
+@import '@fontsource/space-grotesk/700.css';
+@import '@fontsource/space-mono/400.css';
+@import '@fontsource/space-mono/700.css';
+
+/* ============================================================================
+   TAILWIND DIRECTIVES
+   ============================================================================ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+   CSS CUSTOM PROPERTIES
+   ============================================================================ */
+
+:root {
+  /* Ink scale */
+  --color-ink-base:      #1C1B19;
+  --color-ink-deep:      #141310;
+  --color-ink-mid:       #242320;
+  --color-ink-border:    #2C2B29;
+  --color-ink-primary:   #1C1B19;
+  --color-ink-secondary: #5C5850;
+  --color-ink-muted:     #8A8578;
+  --color-ink-hint:      #6B6862;
+
+  /* Paper scale */
+  --color-paper-base:    #F7F5F0;
+  --color-paper-surface: #FCFBF8;
+  --color-paper-deep:    #EFEDE6;
+  --color-paper-border:  #D8D4C8;
+  --color-paper-muted:   #F0EDEA;
+
+  /* Accents */
+  --color-stamp:         #FF4D2E;
+  --color-stamp-bg:      #FFF3E0;
+  --color-stamp-10:      rgba(255, 77, 46, 0.10);
+  --color-stamp-20:      rgba(255, 77, 46, 0.20);
+  --color-archive:       #2D5A4A;
+  --color-archive-bg:    #E8F5E9;
+
+  /* Danger */
+  --color-danger:        #C0392B;
+  --color-danger-bg:     #FFEBEE;
+
+  /* Legacy aliases (old code may reference these) */
+  --color-bg-base:       #F7F5F0;
+  --color-bg-surface:    #FFFFFF;
+  --color-bg-card:       #FCFBF8;
+  --color-text-primary:  #1C1B19;
+  --color-text-secondary:#5C5850;
+  --color-text-muted:    #8A8578;
+  --color-text-inverse:  #FFFFFF;
+  --color-bg-elevated:   #FCFBF8;
+  --color-bg-border:     #D8D4C8;
+  --color-hairline:      #D8D4C8;
+  --color-indigo:        #FF4D2E;
+  --color-indigo-10:     rgba(255, 77, 46, 0.10);
+  --color-indigo-20:     rgba(255, 77, 46, 0.20);
+  --color-indigo-90:     rgba(255, 77, 46, 0.90);
+  --color-green:         #2D5A4A;
+  --color-green-10:      rgba(45, 90, 74, 0.10);
+  --color-green-20:      rgba(45, 90, 74, 0.20);
+  --color-amber:         #D68910;
+  --color-amber-10:      rgba(214, 137, 16, 0.10);
+  --color-rose:          #C0392B;
+  --color-rose-10:       rgba(192, 57, 43, 0.10);
+  --color-error:         #C0392B;
+
+  /* Typography */
+  --font-display: 'Fraunces Variable', Georgia, serif;
+  --font-body:    'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono:    'Space Mono', 'Courier New', monospace;
+
+  /* Shadows */
+  --shadow-sm:        0 1px 4px rgba(28, 27, 25, 0.06);
+  --shadow-md:        0 2px 8px rgba(28, 27, 25, 0.06);
+  --shadow-lifted:    0 4px 16px rgba(28, 27, 25, 0.12);
+  --shadow-stamp:     0 1px 4px rgba(255, 77, 46, 0.20);
+  --shadow-citation:  0 1px 3px rgba(45, 90, 74, 0.15);
+  --shadow-index-card:0 3px 8px rgba(28, 27, 25, 0.08);
+
+  /* Animation */
+  --duration-fast:   100ms;
+  --duration-normal: 150ms;
+  --duration-slow:   350ms;
+  --duration-flip:   400ms;
+  --easing-smooth:   cubic-bezier(0.4, 0, 0.2, 1);
+  --easing-settle:   cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Z-index */
+  --z-base:     0;
+  --z-dropdown: 10;
+  --z-sticky:   20;
+  --z-overlay:  30;
+  --z-modal:    40;
+  --z-toast:    50;
+}
+
+/* ============================================================================
+   BASE RESET
+   ============================================================================ */
+
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* RESPONSIVE QA: test at 360/480/768/1024/1440px - no overflow-x */
+  html {
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+    tab-size: 2;
+    scroll-behavior: smooth;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+
+  body {
+    font-family: var(--font-body);
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.5;
+    color: var(--color-ink-secondary);
+    background-color: var(--color-paper-base);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    max-width: 100vw;
+    overflow-x: hidden;
+    /* No paper grain — clean flat surfaces only */
+  }
+
+  img, video {
+    max-width: 100%;
+    height: auto;
+    display: block;
+  }
+
+  button, input, select, textarea {
+    font: inherit;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    font-weight: 900;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
+    color: var(--color-ink-base);
+  }
+
+  p {
+    line-height: 1.75;
+  }
+
+  code, pre, kbd, samp {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+  }
+
+  a {
+    color: var(--color-stamp);
+    text-decoration: none;
+  }
+
+  a:hover {
+    text-decoration: underline;
+  }
+}
+
+/* ============================================================================
+   FOCUS RING — stamp color, 2px solid, square corners (no border-radius)
+   ============================================================================ */
+
+@layer base {
+  *:focus-visible {
+    outline: 2px solid var(--color-stamp);
+    outline-offset: 2px;
+    border-radius: 0;
+  }
+}
+
+/* ============================================================================
+   TEXT SELECTION — stamp red at 20% opacity
+   ============================================================================ */
+
+::selection {
+  background: rgba(255, 77, 46, 0.20);
+  color: var(--color-ink-base);
+}
+
+/* ============================================================================
+   SCROLLBAR — 6px, paper.border track, ink.muted thumb
+   ============================================================================ */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-paper-border);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-ink-muted);
+  border-radius: 0;
+  transition: background var(--duration-normal) var(--easing-smooth);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-secondary);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink-muted) var(--color-paper-border);
+}
+
+/* ============================================================================
+   MOTION PREFERENCES
+   ============================================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transform: none !important;
+  }
+}
+
+/* ============================================================================
+   STREAMING CURSOR
+   ============================================================================ */
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+.streaming-cursor {
+  display: inline-block;
+  width: 8px;
+  color: var(--color-stamp);
+  animation: cursor-blink 400ms step-end infinite;
+}
+
+/* ============================================================================
+   DOCUMENT RELATION MAP — SELECTED NODE PULSE
+   ============================================================================ */
+
+/* Radius values match NODE_RADIUS (24) +6/+12 in DocumentRelationMap.tsx */
+@keyframes pulse {
+  0%, 100% { r: 30; opacity: 0.4; }
+  50%       { r: 36; opacity: 0.15; }
+}
+
+/* ============================================================================
+   COMPONENT LAYER UTILITIES
+   ============================================================================ */
+
+@layer components {
+
+  /* ── Typography utilities ────────────────────────────────────────────────── */
+  .mono {
+    font-family: var(--font-mono);
+  }
+
+  .label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    font-weight: 600;
+  }
+
+  /* ── Panel utilities ─────────────────────────────────────────────────────── */
+  .ink-panel {
+    background: var(--color-ink-base);
+    color: var(--color-paper-base);
+  }
+
+  .paper-panel {
+    background: var(--color-paper-base);
+    color: var(--color-ink-base);
+  }
+
+  /* ── Badge utilities ─────────────────────────────────────────────────────── */
+  .stamp-badge {
+    background: var(--color-stamp);
+    color: #FFFFFF;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 7px;
+    display: inline-block;
+    line-height: 1.4;
+  }
+
+  .archive-badge {
+    background: var(--color-archive);
+    color: #FFFFFF;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 7px;
+    display: inline-block;
+    line-height: 1.4;
+  }
+
+  /* ── Status pill utilities ───────────────────────────────────────────────── */
+  .status-ready {
+    background: var(--color-archive-bg);
+    color: var(--color-archive);
+    border: 1px solid var(--color-archive);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    padding: 3px 8px;
+    display: inline-block;
+    line-height: 1.4;
+  }
+
+  .status-processing {
+    background: var(--color-stamp-bg);
+    color: #E65100;
+    border: 1px solid #E65100;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    padding: 3px 8px;
+    display: inline-block;
+    line-height: 1.4;
+  }
+
+  .status-pending {
+    background: var(--color-paper-border);
+    color: var(--color-ink-muted);
+    border: 1px solid var(--color-paper-border);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    padding: 3px 8px;
+    display: inline-block;
+    line-height: 1.4;
+  }
+
+  .status-failed {
+    background: var(--color-danger-bg);
+    color: var(--color-danger);
+    border: 1px solid var(--color-danger);
+    font-family: var(--font-mono);
+    font-size: 9px;
+    padding: 3px 8px;
+    display: inline-block;
+    line-height: 1.4;
+  }
+
+  /* ── Space Mono data display ─────────────────────────────────────────────── */
+  .font-mono-data {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+  }
+
+  /* ── Paper card surface ──────────────────────────────────────────────────── */
+  .paper-card {
+    background: var(--color-paper-surface);
+    border: 1px solid var(--color-paper-border);
+    box-shadow: var(--shadow-md);
+  }
+
+  /* ── Archive border accent (margin note style) ───────────────────────────── */
+  .archive-border {
+    border-left: 4px solid var(--color-archive);
+  }
+
+  /* ── Button hover effects ────────────────────────────────────────────────── */
+  .btn-stamp-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 77, 46, 0.35);
+    transition: all 150ms ease;
+  }
+
+  .btn-stamp-hover:active {
+    transform: translateY(0);
+    box-shadow: none;
+  }
+
+  .btn-dark-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(28, 27, 25, 0.20);
+    transition: all 150ms ease;
+  }
+
+  .btn-dark-hover:active {
+    transform: translateY(0);
+    box-shadow: none;
+  }
+
+  /* ── Index card hover ────────────────────────────────────────────────────── */
+  .index-card-hover {
+    transition: transform 200ms ease, box-shadow 200ms ease;
+  }
+
+  .index-card-hover:hover {
+    box-shadow: 0 6px 16px rgba(28, 27, 25, 0.14);
+  }
+
+  /* ── Tab content fade ────────────────────────────────────────────────────── */
+  .tab-content-fade {
+    animation: tab-fade 150ms ease;
+  }
+
+  @keyframes tab-fade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  /* ── Dropzone accent strip (dashed top border) ───────────────────────────── */
+  .dropzone-accent-strip {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: repeating-linear-gradient(
+      90deg,
+      #FF4D2E 0px,
+      #FF4D2E 14px,
+      transparent 14px,
+      transparent 36px
+    );
+  }
+
+  /* ── Index card scene ────────────────────────────────────────────────────── */
+  .card-scene {
+    perspective: 800px;
+  }
+
+  .card-flipper {
+    transition: transform var(--duration-flip) cubic-bezier(0.4, 0, 0.2, 1);
+    transform-style: preserve-3d;
+    position: relative;
+  }
+
+  .card-flipper.is-flipped {
+    transform: rotateY(180deg);
+  }
+
+  .card-face {
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+  }
+
+  .card-face-back {
+    transform: rotateY(180deg);
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* ── Toast slight rotation ───────────────────────────────────────────────── */
+  .toast-note {
+    transform: rotate(1deg);
+    transform-origin: bottom right;
+  }
+
+  /* ── Ticker scroll animation ─────────────────────────────────────────────── */
+  @keyframes ticker-scroll {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); }
+  }
+
+  .ticker-scroll {
+    animation: ticker-scroll 20s linear infinite;
+  }
+
+  /* ── Card pulse animation for citation click ─────────────────────────────── */
+  @keyframes card-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(45,90,74,0.5); }
+    50%  { box-shadow: 0 0 0 8px rgba(45,90,74,0.2); }
+    100% { box-shadow: 0 0 0 3px rgba(45,90,74,0.15); }
+  }
+
+  .card-pulse {
+    animation: card-pulse 800ms ease-out forwards;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .card-pulse {
+      animation: none;
+    }
+  }
+}

@@ -1,0 +1,22 @@
+# Supabase is remote (cloud-hosted) — no local container needed.
+# Only Redis is run locally for BullMQ job queues.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: rag-kb-redis
+    ports:
+      - '127.0.0.1:6379:6379'
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set — no weak default is provided. Set it in your .env file.}
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', '${REDIS_PASSWORD:?REDIS_PASSWORD must be set — no weak default is provided. Set it in your .env file.}', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis_data:
+    driver: local

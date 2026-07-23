@@ -1,0 +1,192 @@
+name: CI
+
+# Mirrors the quality gates already enforced locally by .husky/pre-commit
+# (lint, type-check, unit tests) and the full pipeline documented in
+# CLAUDE.md / the root "quality-check" script (+ integration tests +
+# complexity-audit). No new checks beyond what already runs locally.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# Node version pinned to backend/package.json's engines.node floor
+# (">=20.0.0"); frontend has no engines field of its own, so the same
+# version is used for both for consistency.
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ── Backend: lint ──────────────────────────────────────────────────────
+  backend-lint:
+    name: Backend / Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - run: npm run lint:check
+        working-directory: backend
+
+  # ── Backend: type-check ────────────────────────────────────────────────
+  backend-typecheck:
+    name: Backend / Type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - run: npm run type-check
+        working-directory: backend
+
+  # ── Backend: build ──────────────────────────────────────────────────────
+  # tsc --noEmit (type-check, above) does not catch every emit-time failure —
+  # this actually produces dist/ so a broken build surfaces in CI, not when
+  # the deploy host tries to build it for real.
+  backend-build:
+    name: Backend / Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - run: npm run build
+        working-directory: backend
+
+  # ── Backend: complexity audit ──────────────────────────────────────────
+  # Documented in CLAUDE.md as a required step in the full quality pipeline.
+  backend-complexity:
+    name: Backend / Complexity audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - run: npm run complexity-audit
+        working-directory: backend
+
+  # ── Backend: unit tests ─────────────────────────────────────────────────
+  backend-test-unit:
+    name: Backend / Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - run: npm run test:unit
+        working-directory: backend
+
+  # ── Backend: integration tests ─────────────────────────────────────────
+  # No service containers (Redis/Supabase) are provisioned here: every
+  # integration test mocks its external dependency at the module boundary
+  # (vectorStore, documentQueue, @clerk/backend, the Groq client) — verified
+  # by running the full integration suite with REDIS_URL pointed at an
+  # unreachable port and no real Supabase/Groq/HuggingFace credentials; all
+  # 111 tests pass unchanged. If a future integration test is added that
+  # needs a real service, add it as a `services:` container on this job.
+  backend-test-integration:
+    name: Backend / Integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - run: npm run test:integration
+        working-directory: backend
+
+  # ── Frontend: lint ──────────────────────────────────────────────────────
+  frontend-lint:
+    name: Frontend / Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run lint:check
+        working-directory: frontend
+
+  # ── Frontend: type-check ────────────────────────────────────────────────
+  frontend-typecheck:
+    name: Frontend / Type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run type-check
+        working-directory: frontend
+
+  # ── Frontend: unit tests ────────────────────────────────────────────────
+  frontend-test:
+    name: Frontend / Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm test
+        working-directory: frontend
+
+  # ── Frontend: build ─────────────────────────────────────────────────────
+  # tsc --noEmit (type-check, above) doesn't run the Vite production build —
+  # this catches Vite-specific build errors (e.g. bad imports, asset
+  # resolution) that type-check alone misses.
+  frontend-build:
+    name: Frontend / Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend

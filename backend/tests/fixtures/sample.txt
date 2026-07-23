@@ -1,0 +1,19 @@
+Introduction to Retrieval-Augmented Generation
+
+Retrieval-Augmented Generation (RAG) is an AI framework that combines the strengths of retrieval-based and generative models. It enhances large language model outputs by grounding them in factual, retrieved documents.
+
+How RAG Works
+
+The RAG pipeline consists of three core stages. First, documents are ingested and split into overlapping text chunks. Each chunk is converted into a dense vector embedding that captures its semantic meaning.
+
+Second, when a user submits a query, the query is also embedded into the same vector space. A similarity search finds the chunks whose embeddings are closest to the query embedding.
+
+Third, the retrieved chunks are assembled into a context block and injected into the LLM prompt alongside the original question. The model generates an answer grounded exclusively in that context.
+
+Benefits
+
+RAG reduces hallucination by constraining the model to verified source material. It enables knowledge to be updated without retraining the model — simply add new documents to the vector store. It also provides source citations so answers can be audited.
+
+Technical Stack
+
+A typical RAG stack includes a vector database such as Supabase pgvector or Pinecone, an embedding model such as sentence-transformers/all-MiniLM-L6-v2, and a generative model such as Groq llama-3.1-8b-instant.
