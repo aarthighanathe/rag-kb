@@ -81,6 +81,30 @@ export async function addDocumentJob(data: DocumentJobData): Promise<string> {
 }
 
 /**
+ * Retries the in-process abort briefly for a job that's active in Redis but has no
+ * registered AbortController yet — a narrow startup race where the worker has claimed
+ * the job but hasn't reached beginAttempt(). Without this retry, the worker would fully
+ * process (and write chunks for) a document that's about to be deleted.
+ * @param documentId - Document UUID, equal to the BullMQ job ID
+ */
+async function cancelActiveJobWithRetry(documentId: string): Promise<void> {
+  const retryDelaysMs = [50, 150, 300];
+  for (const delayMs of retryDelaysMs) {
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    if (cancelInFlightAttempt(documentId)) {
+      logger.info('Cancelled active document job after registration race retry', {
+        documentId,
+        delayMs,
+      });
+      return;
+    }
+  }
+  logger.warn('Active document job could not be aborted — no attempt controller registered', {
+    documentId,
+  });
+}
+
+/**
  * Cancels a document's processing job, covering every stage it could be in:
  *  - waiting/delayed (not yet picked up by the worker): removed from the queue outright
  *  - active (currently being processed): the worker's in-flight attempt is aborted via
@@ -113,25 +137,7 @@ export async function cancelDocumentJob(documentId: string): Promise<void> {
   }
 
   if (state === 'active') {
-    // The job is active in Redis but cancelInFlightAttempt found no registered
-    // AbortController — a narrow startup race where the worker has claimed the
-    // job but hasn't reached beginAttempt() yet. Retry the in-process abort
-    // briefly instead of silently no-op'ing, which would otherwise let the
-    // worker fully process (and write chunks for) a document about to be deleted.
-    const retryDelaysMs = [50, 150, 300];
-    for (const delayMs of retryDelaysMs) {
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-      if (cancelInFlightAttempt(documentId)) {
-        logger.info('Cancelled active document job after registration race retry', {
-          documentId,
-          delayMs,
-        });
-        return;
-      }
-    }
-    logger.warn('Active document job could not be aborted — no attempt controller registered', {
-      documentId,
-    });
+    await cancelActiveJobWithRetry(documentId);
   }
 }
 

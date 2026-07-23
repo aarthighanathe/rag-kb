@@ -546,6 +546,30 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 }
 
 /**
+ * Groups chunk rows by document_id, capping each document's sample at SAMPLE_SIZE and
+ * skipping rows with missing/empty embeddings. Rows are expected pre-sorted by
+ * document_id then chunk_index, so the first SAMPLE_SIZE kept per document are its
+ * earliest chunks.
+ * @param rows - Chunk rows fetched for the ready documents
+ * @returns Map of document ID to sampled embeddings (up to SAMPLE_SIZE each)
+ */
+function groupEmbeddingsByDocument(
+  rows: Array<{ document_id: string; embedding: number[]; chunk_index: number }>,
+): Map<string, number[][]> {
+  const docEmbeddings: Map<string, number[][]> = new Map();
+  for (const row of rows) {
+    if (!Array.isArray(row.embedding) || row.embedding.length === 0) continue;
+    const existing = docEmbeddings.get(row.document_id);
+    if (existing) {
+      if (existing.length < SAMPLE_SIZE) existing.push(row.embedding);
+    } else {
+      docEmbeddings.set(row.document_id, [row.embedding]);
+    }
+  }
+  return docEmbeddings;
+}
+
+/**
  * Fetches all ready documents and their chunk embeddings.
  * Returns a map of document ID to array of embedding vectors.
  *
@@ -573,8 +597,7 @@ async function fetchReadyDocumentEmbeddings(userId: string): Promise<{
   if (docsError) throw toDbInternalError('Failed to fetch documents for similarity', docsError.message);
   const documents = (docs as Array<{ id: string; original_name: string; file_type: string; chunk_count: number }>) ?? [];
 
-  const docEmbeddings: Map<string, number[][]> = new Map();
-  if (documents.length === 0) return { documents, embeddings: docEmbeddings };
+  if (documents.length === 0) return { documents, embeddings: new Map() };
 
   const documentIds = documents.map((d) => d.id);
   const { data: chunks, error: chunksError } = await getClient()
@@ -586,21 +609,11 @@ async function fetchReadyDocumentEmbeddings(userId: string): Promise<{
 
   if (chunksError) {
     logger.warn('Failed to fetch chunks for similarity', { userId, error: chunksError.message });
-    return { documents, embeddings: docEmbeddings };
+    return { documents, embeddings: new Map() };
   }
 
   const rows = (chunks as Array<{ document_id: string; embedding: number[]; chunk_index: number }>) ?? [];
-  for (const row of rows) {
-    if (!Array.isArray(row.embedding) || row.embedding.length === 0) continue;
-    const existing = docEmbeddings.get(row.document_id);
-    if (existing) {
-      if (existing.length < SAMPLE_SIZE) existing.push(row.embedding);
-    } else {
-      docEmbeddings.set(row.document_id, [row.embedding]);
-    }
-  }
-
-  return { documents, embeddings: docEmbeddings };
+  return { documents, embeddings: groupEmbeddingsByDocument(rows) };
 }
 
 /**

@@ -15,7 +15,9 @@ import { z } from 'zod';
  * @param field - Name of the path parameter (e.g. 'id', 'jobId', 'queryId')
  * @returns Zod object schema with one UUID-validated field
  */
-export function uuidParamSchema<TField extends string>(field: TField) {
+export function uuidParamSchema<TField extends string>(
+  field: TField,
+): z.ZodObject<{ [K in TField]: z.ZodString }> {
   return z.object({
     [field]: z.string().uuid(`${field} must be a valid UUID`),
   }) as z.ZodObject<{ [K in TField]: z.ZodString }>;

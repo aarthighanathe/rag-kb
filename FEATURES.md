@@ -611,6 +611,20 @@ How it works:
 
 ---
 
+## 12.2 Deployment
+
+Status: ✅
+
+How it works: The backend deploys to Render as a single Node web service (`render.yaml` at repo root) — `rootDir: backend`, builds with `npm ci && npm run build`, runs with `npm start`, and is health-checked against `GET /health`. There is no separate worker process: the BullMQ `documentWorker` runs in-process inside the same server (`backend/src/index.ts`), so one Render service handles both HTTP traffic and document-ingestion jobs. All secrets (`GROQ_API_KEY`, `HUGGINGFACE_TOKEN`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `DATABASE_URL`, `REDIS_URL`, `CORS_ORIGIN`, `ADMIN_SECRET`, `CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`) are marked `sync: false` in `render.yaml` and must be entered manually in the Render dashboard — Zod validation in `config/env.ts` fails fast at boot if any are missing. Redis in production is an external managed instance (e.g. Upstash), not the local `docker-compose.yml` Redis, which is dev-only.
+
+The frontend deploys to Vercel (`frontend/vercel.json`) as a static Vite build (`npm run build` → `dist/`), with an SPA rewrite (`/(.*) → /index.html`) so client-side routing works on refresh/deep links. Because the frontend and backend are on different origins, `VITE_API_BASE_URL` must be set in Vercel to the deployed Render backend's full URL (e.g. `https://rag-kb-backend.onrender.com/api`), and the backend's `CORS_ORIGIN` must be set to the deployed Vercel URL — both are required env vars with no production default, by design (see `config/env.ts`).
+
+Supabase (pgvector) is already cloud-hosted regardless of environment — `supabase/migrations/` are applied via `npm run db:migrate` (reads `DATABASE_URL`) against the same project used in dev, or a separate production Supabase project if provisioned.
+
+Clerk Google OAuth uses Clerk's shared dev credentials out of the box (see Known Issues below) — production deployments should wire up dedicated Google Cloud OAuth 2.0 credentials in the Clerk dashboard before going live.
+
+---
+
 ## 13. Responsive Breakpoints
 
 Tailwind screens are fully overridden: `sm: 640px`, `md: 768px`, `lg: 1024px`, `xl: 1280px` (no `2xl`). Playwright's `responsive.spec.ts` tests exactly 5 viewport widths.
