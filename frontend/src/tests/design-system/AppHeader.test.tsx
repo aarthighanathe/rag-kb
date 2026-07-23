@@ -30,9 +30,11 @@ describe('AppHeader — structure', () => {
     expect(screen.getByRole('banner')).toBeInTheDocument();
   });
 
-  it('renders the RAG KB logo link', () => {
+  it('renders the RAG KB logo link pointing to Upload', () => {
     renderHeader();
-    expect(screen.getByRole('link', { name: /rag kb.*home/i })).toBeInTheDocument();
+    const logo = screen.getByRole('link', { name: /rag kb.*upload/i });
+    expect(logo).toBeInTheDocument();
+    expect(logo).toHaveAttribute('href', '/upload');
   });
 
   it('renders tablist with three tabs', () => {

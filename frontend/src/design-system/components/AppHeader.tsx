@@ -61,9 +61,14 @@ export function AppHeader(): React.JSX.Element {
       aria-label="Application navigation"
     >
       {/* ── Logo ─────────────────────────────────────────────────────────── */}
+      {/* Links straight to /upload, not '/' — AppHeader only mounts on interior
+          routes, so the user is always signed in here, and '/' would just
+          redirect straight back to /upload anyway (see Landing.tsx). Linking
+          directly avoids a round-trip that's a visible no-op when already on
+          /upload — clicking the logo there would otherwise appear to do nothing. */}
       <NavLink
-        to="/"
-        aria-label="RAG KB — go to home"
+        to="/upload"
+        aria-label="RAG KB — go to Upload"
         className="flex items-center gap-2 px-4 sm:px-5 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset"
         style={{ focusVisibleOutlineColor: '#FF4D2E' } as React.CSSProperties}
       >
