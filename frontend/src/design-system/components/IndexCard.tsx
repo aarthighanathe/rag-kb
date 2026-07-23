@@ -245,9 +245,9 @@ export function IndexCard({
           {!isFlipped ? (
             // Front
             <div data-testid="index-card-front" className="p-3 pt-4">
-              <div className="flex items-center gap-1.5 mb-2 pr-10">
+              <div className="flex items-center gap-1.5 mb-2 pr-10 min-w-0">
                 <DocTypeIcon name={documentName} />
-                <span className="text-ds-xs font-body font-medium text-ds-text-primary truncate">
+                <span className="text-ds-xs font-body font-medium text-ds-text-primary truncate min-w-0">
                   {documentName}{chunkRef ? ` · ${chunkRef}` : ''}
                 </span>
               </div>
@@ -318,9 +318,9 @@ export function IndexCard({
           className={`card-face w-full text-left cursor-pointer ${cardSurface} focus-visible:outline-2 focus-visible:outline-ds-stamp focus-visible:outline-offset-2`}
         >
           <div className="p-3 pt-4">
-            <div className="flex items-center gap-1.5 mb-2 pr-10">
+            <div className="flex items-center gap-1.5 mb-2 pr-10 min-w-0">
               <DocTypeIcon name={documentName} />
-              <span className="text-ds-xs font-body font-medium text-ds-text-primary truncate">
+              <span className="text-ds-xs font-body font-medium text-ds-text-primary truncate min-w-0">
                 {documentName}{chunkRef ? ` · ${chunkRef}` : ''}
               </span>
             </div>

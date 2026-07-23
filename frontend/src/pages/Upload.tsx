@@ -21,7 +21,6 @@ import { useAppToast } from '../contexts/ToastContext';
 import { estimateProcessingSeconds, formatETA } from '../utils/estimateETA';
 import { timeAgo } from '../utils/timeAgo';
 import { pluralize } from '../utils/pluralize';
-import { useIsMobile } from '../hooks/useMobileBreakpoint';
 import { getDocument, type ChunkQualityStats, type DocumentRecord } from '../services/api';
 
 // ---------------------------------------------------------------------------
@@ -543,7 +542,6 @@ export function Upload(): React.JSX.Element {
   const [isStartingUpload, setIsStartingUpload] = useState(false);
   const [isDragOver, setIsDragOver]             = useState(false);
   const notifiedReadyIds = useRef<Set<string>>(new Set());
-  const isNarrow = useIsMobile(480);
 
   useEffect(() => { void fetchDocuments(); }, [fetchDocuments]);
 
@@ -637,22 +635,18 @@ export function Upload(): React.JSX.Element {
       >
         {/* Page header strip */}
         <div
+          className="flex flex-col md:flex-row md:items-baseline gap-3.5 md:gap-0 p-4 sm:p-5 md:px-8 md:py-5"
           style={{
             background: '#FFFFFF',
             borderBottom: '1px solid #D8D4C8',
-            padding: isNarrow ? '16px 20px' : '20px 32px',
-            display: 'flex',
-            flexDirection: isNarrow ? 'column' : 'row',
-            alignItems: isNarrow ? 'stretch' : 'baseline',
             justifyContent: 'space-between',
-            gap: isNarrow ? '14px' : 0,
             flexShrink: 0,
           }}
         >
-          <div>
+          <div className="min-w-0">
             <h1
-              className="font-display"
-              style={{ fontSize: isNarrow ? '24px' : '32px', fontWeight: 900, fontStyle: 'italic', color: '#1C1B19', letterSpacing: '-0.02em' }}
+              className="font-display text-2xl md:text-[32px]"
+              style={{ fontWeight: 900, fontStyle: 'italic', color: '#1C1B19', letterSpacing: '-0.02em' }}
             >
               Acquisitions Desk
             </h1>
@@ -668,6 +662,7 @@ export function Upload(): React.JSX.Element {
             disabled={pendingFiles.length === 0 || isStartingUpload}
             onClick={() => void handleUpload()}
             aria-label={`File ${pendingFiles.length} document${pendingFiles.length !== 1 ? 's' : ''}`}
+            className="w-full md:w-auto flex-shrink-0"
             style={{
               background: pendingFiles.length === 0 ? '#F0EDEA' : '#FF4D2E',
               color: pendingFiles.length === 0 ? '#B8B4AC' : '#FFFFFF',
@@ -678,8 +673,6 @@ export function Upload(): React.JSX.Element {
               fontSize: '13px',
               cursor: pendingFiles.length === 0 ? 'not-allowed' : 'pointer',
               transition: 'all 150ms ease',
-              flexShrink: 0,
-              width: isNarrow ? '100%' : 'auto',
             }}
           >
             {isStartingUpload ? 'Filing…' : `File document${pendingFiles.length !== 1 ? 's' : ''} →`}
@@ -687,7 +680,7 @@ export function Upload(): React.JSX.Element {
         </div>
 
         {/* Scrollable content area */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '24px 32px' }}>
 
           {/* Drop zone */}
           <div

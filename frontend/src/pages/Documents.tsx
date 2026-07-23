@@ -680,12 +680,12 @@ export function Documents(): React.JSX.Element {
                         <button
                           type="button"
                           onClick={() => toggleExpand(doc.id)}
-                          className="flex items-center gap-2 text-left hover:text-ds-stamp transition-colors"
+                          className="flex items-center gap-2 text-left hover:text-ds-stamp transition-colors min-w-0"
                           aria-expanded={isExp}
                           aria-label={`${isExp ? 'Collapse' : 'Expand'} details for ${doc.filename}`}
                         >
                           <FileText size={13} className="text-ds-text-muted shrink-0" aria-hidden="true" />
-                          <span className="flex flex-col">
+                          <span className="flex flex-col min-w-0">
                             <span className="text-ds-sm font-body text-ds-text-primary max-w-[240px] truncate">{doc.filename}</span>
                             {isDupe && (
                               <span className="text-[10px] font-mono text-ds-stamp">id {doc.id.slice(0, 8)}</span>

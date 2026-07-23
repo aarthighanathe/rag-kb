@@ -69,7 +69,7 @@ export function AppHeader(): React.JSX.Element {
       >
         <BookOpen size={18} aria-hidden="true" style={{ color: '#FCFBF8' }} />
         <span
-          className="font-display font-black hidden xs:inline"
+          className="font-display font-black"
           style={{
             fontSize: '20px',
             color: '#F7F5F0',

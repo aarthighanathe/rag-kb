@@ -64,7 +64,7 @@ export function CitationChip({
   return (
     <>
       {/* Citation marker wrapper — positioned for the string connector */}
-      <span className={`relative inline-flex items-center gap-1.5 ${className}`}>
+      <span className={`relative inline-flex items-center flex-wrap gap-1.5 ${className}`}>
         {/* Superscript number badge — the primary visual element */}
         <button
           type="button"
@@ -95,7 +95,7 @@ export function CitationChip({
         </button>
 
         {/* Document name + chunk ref — visible label next to the badge */}
-        <span className="text-ds-xs font-mono text-ds-archive truncate max-w-[160px]">
+        <span className="text-ds-xs font-mono text-ds-archive truncate min-w-0 max-w-[100px] sm:max-w-[160px]">
           {documentName}
         </span>
         <span className="text-ds-xs font-mono text-ds-text-muted shrink-0">
