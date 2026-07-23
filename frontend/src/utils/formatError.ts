@@ -26,8 +26,26 @@ const BACKEND_UNREACHABLE_PATTERN =
   /typeerror:\s*fetch failed|failed to fetch|networkerror when attempting to fetch|load failed|econnrefused|enotfound|network error|getaddrinfo|socket hang up/i;
 
 /**
+ * Detects whether a raw error message describes the browser's `fetch` failing
+ * before any response was received — i.e. the backend itself is unreachable,
+ * as opposed to the backend responding with an error. There is no server
+ * `.code` for this case since no response body was ever received, so the raw
+ * message is the only signal available.
+ * @param message - Raw error message to test
+ * @returns True if the message matches a known network-unreachable pattern
+ */
+export function isBackendUnreachable(message: string): boolean {
+  return BACKEND_UNREACHABLE_PATTERN.test(message.trim());
+}
+
+/**
  * Converts a raw error message into text suitable for UI display.
- * @param message - Raw error string from API or caught exception
+ * Callers are expected to have already established that `message` is safe to
+ * show — either it came from a server response, or `isBackendUnreachable`
+ * matched it. This function only handles the DB-error-code special cases and
+ * the network-unreachable rewrite; it does not decide whether a message
+ * should be shown at all.
+ * @param message - Raw error string from API or a confirmed network failure
  * @param code - Machine-readable error code from the API envelope, when available
  *   (TypedApiError.code) — preferred over message-sniffing when present
  * @returns User-facing error message — never "[object Object]" or bare TypeError text
@@ -45,10 +63,7 @@ export function formatUserFacingError(message: string, code?: string): string {
     return 'Database service is unavailable. Verify Supabase is configured in backend/.env and restart the server.';
   }
 
-  // No code (or a code from an endpoint that doesn't classify DB errors) —
-  // this is either a backend-unreachable network failure, or a message that
-  // already reads fine as-is (validation/business errors from any other code).
-  if (BACKEND_UNREACHABLE_PATTERN.test(trimmed)) {
+  if (isBackendUnreachable(trimmed)) {
     return 'Could not reach the server. Ensure the backend is running on port 3000.';
   }
 

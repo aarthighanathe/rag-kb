@@ -7,7 +7,7 @@
  * @created 2026-06-16
  */
 
-import { formatUserFacingError } from '../utils/formatError';
+import { formatUserFacingError, isBackendUnreachable } from '../utils/formatError';
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -173,40 +173,33 @@ function parseApiErrorBody(
 
 /**
  * Extracts a human-readable error message from any thrown value.
+ *
+ * Only two cases show real error text to the user: a server-produced
+ * `TypedApiError` (a real API response, already written to be read by a
+ * user), and the browser's own `fetch` rejecting before any response was
+ * received (the backend is unreachable — a specific, recognizable
+ * condition worth naming, not a stack-trace fragment). Every other caught
+ * value — a client-side exception, a raw string, an unexpected object
+ * shape — never reached the server and never matched a known network
+ * failure, so its message is internal by definition and is replaced by
+ * `fallback` instead of being shown as-is.
  * @param err - Caught error (Error, string, API envelope object, or unknown)
- * @param fallback - Message used when no readable string can be extracted
+ * @param fallback - Message shown for any non-server-originated, non-network error
  * @returns Always a plain string — never an object
  */
 export function extractErrorMessage(
   err: unknown,
   fallback = 'Upload failed — unknown error',
 ): string {
-  let raw = fallback;
-  let code: string | undefined;
-
   if (err instanceof TypedApiError) {
-    raw = err.message;
-    code = err.code;
-  } else if (err instanceof Error) {
-    raw = err.message;
-  } else if (typeof err === 'string') {
-    raw = err;
-  } else if (err && typeof err === 'object') {
-    const record = err as Record<string, unknown>;
-    if (record.error && typeof record.error === 'object' && record.error !== null) {
-      const errObj = record.error as Record<string, unknown>;
-      if (typeof errObj.message === 'string') {
-        raw = errObj.message;
-      }
-      if (typeof errObj.code === 'string') {
-        code = errObj.code;
-      }
-    } else if (typeof record.message === 'string') {
-      raw = record.message;
-    }
+    return formatUserFacingError(err.message, err.code);
   }
 
-  return formatUserFacingError(raw, code);
+  if (err instanceof Error && isBackendUnreachable(err.message)) {
+    return formatUserFacingError(err.message);
+  }
+
+  return fallback;
 }
 
 // ---------------------------------------------------------------------------
