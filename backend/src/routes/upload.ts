@@ -6,12 +6,11 @@
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { writeFile, mkdir, unlink } from 'fs/promises';
-import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
 import { validateFile, MIME_TO_FILE_TYPE } from '../utils/fileValidator.js';
 import { createDocument, deleteDocument } from '../services/vectorStore.js';
+import { uploadFile, removeFile } from '../services/storage.js';
 import { addDocumentJob } from '../queues/documentQueue.js';
 import { UploadRequestSchema } from '../schemas/upload.schema.js';
 import { ValidationError, InternalError, type FileType } from '../types/index.js';
@@ -19,8 +18,6 @@ import { logger } from '../utils/logger.js';
 import { env } from '../config/env.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-const UPLOAD_DIR = path.join(process.cwd(), 'uploads');
 
 const ALLOWED_MIME_TYPES = Object.keys(MIME_TO_FILE_TYPE);
 
@@ -50,17 +47,18 @@ const upload = multer({
 const router = Router();
 
 /**
- * Best-effort removal of the temp file written to disk before a later step failed.
- * Swallows errors — cleanup failing must never mask the original upload error.
- * @param destPath - Absolute path to the file to remove
+ * Best-effort removal of the staged file from Supabase Storage before a later
+ * step failed. Swallows errors — cleanup failing must never mask the
+ * original upload error.
+ * @param storageKey - Key of the staged file to remove
  * @param correlationId - Request correlation ID for log tracing
  */
-async function rollbackFile(destPath: string, correlationId: string): Promise<void> {
+async function rollbackFile(storageKey: string, correlationId: string): Promise<void> {
   try {
-    await unlink(destPath);
+    await removeFile(storageKey);
   } catch (err) {
-    logger.warn('Failed to roll back temp file after upload failure — manual cleanup may be needed', {
-      destPath,
+    logger.warn('Failed to roll back staged file after upload failure — manual cleanup may be needed', {
+      storageKey,
       correlationId,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -113,7 +111,6 @@ async function processUploadedFile(
   const validated = await validateFile(file.buffer, file.originalname, env.MAX_FILE_SIZE_MB);
 
   const documentId = uuidv4();
-  const destPath = path.join(UPLOAD_DIR, `${documentId}_${validated.sanitizedName}`);
   const storageKey = `${documentId}_${validated.sanitizedName}`;
   const fileType: FileType | undefined = MIME_TO_FILE_TYPE[validated.mimeType];
   if (!fileType) {
@@ -124,8 +121,7 @@ async function processUploadedFile(
     throw new InternalError(`No FileType mapping for validated MIME type "${validated.mimeType}"`);
   }
 
-  await mkdir(UPLOAD_DIR, { recursive: true });
-  await writeFile(destPath, file.buffer);
+  await uploadFile(storageKey, file.buffer);
 
   try {
     await createDocument({
@@ -137,7 +133,7 @@ async function processUploadedFile(
       userId,
     });
   } catch (err) {
-    await rollbackFile(destPath, correlationId);
+    await rollbackFile(storageKey, correlationId);
     throw err;
   }
 
@@ -145,7 +141,7 @@ async function processUploadedFile(
   try {
     jobId = await addDocumentJob({
       documentId,
-      filePath: destPath,
+      storageKey,
       fileType,
       originalName: validated.sanitizedName,
       correlationId,
@@ -154,7 +150,7 @@ async function processUploadedFile(
   } catch (err) {
     // Reverse order: the row referencing the file must go before the file itself.
     await rollbackDocumentRow(documentId, userId, correlationId);
-    await rollbackFile(destPath, correlationId);
+    await rollbackFile(storageKey, correlationId);
     throw err;
   }
 

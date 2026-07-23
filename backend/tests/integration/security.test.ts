@@ -54,9 +54,10 @@ vi.mock('@utils/readiness', () => ({
   }),
 }));
 
-vi.mock('fs/promises', () => ({
-  writeFile: vi.fn().mockResolvedValue(undefined),
-  mkdir: vi.fn().mockResolvedValue(undefined),
+vi.mock('@services/storage', () => ({
+  uploadFile: vi.fn().mockResolvedValue(undefined),
+  downloadFile: vi.fn(),
+  removeFile: vi.fn().mockResolvedValue(undefined),
 }));
 
 // ── Shared fixtures ────────────────────────────────────────────────────────────

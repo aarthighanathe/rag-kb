@@ -25,10 +25,10 @@ vi.mock('@queues/documentQueue', () => ({
   getJobStatus: vi.fn(),
 }));
 
-vi.mock('fs/promises', () => ({
-  writeFile: vi.fn().mockResolvedValue(undefined),
-  mkdir: vi.fn().mockResolvedValue(undefined),
-  unlink: vi.fn().mockResolvedValue(undefined),
+vi.mock('@services/storage', () => ({
+  uploadFile: vi.fn().mockResolvedValue(undefined),
+  downloadFile: vi.fn(),
+  removeFile: vi.fn().mockResolvedValue(undefined),
 }));
 
 // ── Test fixtures ──────────────────────────────────────────────────────────────
@@ -224,11 +224,11 @@ describe('POST /api/upload', () => {
       expect(res.body.error).toBeDefined();
     });
 
-    it('rolls back the written temp file when createDocument fails', async () => {
+    it('rolls back the staged file when createDocument fails', async () => {
       const { createDocument } = await import('@services/vectorStore') as {
         createDocument: ReturnType<typeof vi.fn>;
       };
-      const { unlink } = await import('fs/promises') as { unlink: ReturnType<typeof vi.fn> };
+      const { removeFile } = await import('@services/storage') as { removeFile: ReturnType<typeof vi.fn> };
       const { InternalError } = await import('../../src/types/index.js');
       createDocument.mockRejectedValueOnce(new InternalError('DB connection refused'));
 
@@ -237,7 +237,7 @@ describe('POST /api/upload', () => {
         .attach('files', PDF_BUFFER, { filename: 'report.pdf', contentType: 'application/pdf' })
         .expect(500);
 
-      expect(unlink).toHaveBeenCalledOnce();
+      expect(removeFile).toHaveBeenCalledOnce();
     });
 
     it('returns 500 when addDocumentJob throws (queue enqueue failure)', async () => {
@@ -254,14 +254,14 @@ describe('POST /api/upload', () => {
       expect(res.body.success).toBe(false);
     });
 
-    it('rolls back the document row and the temp file when addDocumentJob fails', async () => {
+    it('rolls back the document row and the staged file when addDocumentJob fails', async () => {
       const { addDocumentJob } = await import('@queues/documentQueue') as {
         addDocumentJob: ReturnType<typeof vi.fn>;
       };
       const { deleteDocument } = await import('@services/vectorStore') as {
         deleteDocument: ReturnType<typeof vi.fn>;
       };
-      const { unlink } = await import('fs/promises') as { unlink: ReturnType<typeof vi.fn> };
+      const { removeFile } = await import('@services/storage') as { removeFile: ReturnType<typeof vi.fn> };
       addDocumentJob.mockRejectedValueOnce(new Error('Redis connection lost'));
 
       await authedRequest(app)
@@ -270,14 +270,14 @@ describe('POST /api/upload', () => {
         .expect(500);
 
       expect(deleteDocument).toHaveBeenCalledOnce();
-      expect(unlink).toHaveBeenCalledOnce();
+      expect(removeFile).toHaveBeenCalledOnce();
     });
 
     it('does not roll back anything when the upload succeeds', async () => {
       const { deleteDocument } = await import('@services/vectorStore') as {
         deleteDocument: ReturnType<typeof vi.fn>;
       };
-      const { unlink } = await import('fs/promises') as { unlink: ReturnType<typeof vi.fn> };
+      const { removeFile } = await import('@services/storage') as { removeFile: ReturnType<typeof vi.fn> };
 
       await authedRequest(app)
         .post('/api/upload')
@@ -285,7 +285,7 @@ describe('POST /api/upload', () => {
         .expect(200);
 
       expect(deleteDocument).not.toHaveBeenCalled();
-      expect(unlink).not.toHaveBeenCalled();
+      expect(removeFile).not.toHaveBeenCalled();
     });
 
     it('returns 200 when two valid files are uploaded simultaneously', async () => {

@@ -16,8 +16,8 @@ const mockEmbedBatch = vi.fn();
 const mockUpdateDocumentStatus = vi.fn();
 const mockUpsertChunks = vi.fn();
 const mockUpdateChunkCount = vi.fn();
-const mockFsReadFile = vi.fn();
-const mockFsUnlink = vi.fn();
+const mockDownloadFile = vi.fn();
+const mockRemoveFile = vi.fn();
 
 vi.mock('@services/chunker', () => ({
   extractText: mockExtractText,
@@ -32,6 +32,11 @@ vi.mock('@services/vectorStore', () => ({
   updateDocumentStatus: mockUpdateDocumentStatus,
   upsertChunks: mockUpsertChunks,
   updateChunkCount: mockUpdateChunkCount,
+}));
+
+vi.mock('@services/storage', () => ({
+  downloadFile: mockDownloadFile,
+  removeFile: mockRemoveFile,
 }));
 
 /**
@@ -52,13 +57,6 @@ function abortAwareMock<Args extends unknown[]>(
     recordedCalls.push(args);
   };
 }
-
-vi.mock('fs/promises', () => ({
-  default: {
-    readFile: mockFsReadFile,
-    unlink: mockFsUnlink,
-  },
-}));
 
 // ── BullMQ Worker mock ────────────────────────────────────────────────────────
 
@@ -92,7 +90,7 @@ interface MockJob {
   id: string;
   data: {
     documentId: string;
-    filePath: string;
+    storageKey: string;
     fileType: 'pdf' | 'txt' | 'md' | 'docx';
     originalName: string;
     correlationId: string;
@@ -107,7 +105,7 @@ function makeJob(overrides: Partial<MockJob['data']> = {}): MockJob {
     id: 'job-001',
     data: {
       documentId: 'doc-uuid-111',
-      filePath: '/tmp/uploads/doc-uuid-111_report.pdf',
+      storageKey: 'doc-uuid-111_report.pdf',
       fileType: 'pdf',
       originalName: 'report.pdf',
       correlationId: 'corr-xyz-789',
@@ -151,14 +149,14 @@ describe('documentWorker — happy path', () => {
     vi.clearAllMocks();
 
     const fileBuffer = Buffer.from('%PDF-1.4 test content');
-    mockFsReadFile.mockResolvedValue(fileBuffer);
+    mockDownloadFile.mockResolvedValue(fileBuffer);
     mockExtractText.mockResolvedValue('Full document text about AI and machine learning.');
     mockCreateChunks.mockReturnValue(makeChunks(5));
     mockEmbedBatch.mockResolvedValue(makeEmbeddings(5));
     mockUpdateDocumentStatus.mockResolvedValue(undefined);
     mockUpsertChunks.mockResolvedValue(undefined);
     mockUpdateChunkCount.mockResolvedValue(undefined);
-    mockFsUnlink.mockResolvedValue(undefined);
+    mockRemoveFile.mockResolvedValue(undefined);
   });
 
   it('marks document as processing at the start (0%)', async () => {
@@ -269,11 +267,11 @@ describe('documentWorker — happy path', () => {
     expect(result.processingTimeMs).toBeGreaterThanOrEqual(0);
   });
 
-  it('deletes the temp file after successful processing', async () => {
+  it('deletes the staged file after successful processing', async () => {
     const job = makeJob();
     await getProcessor()(job);
 
-    expect(mockFsUnlink).toHaveBeenCalledWith('/tmp/uploads/doc-uuid-111_report.pdf');
+    expect(mockRemoveFile).toHaveBeenCalledWith('doc-uuid-111_report.pdf');
   });
 });
 
@@ -281,11 +279,11 @@ describe('documentWorker — failure handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUpdateDocumentStatus.mockResolvedValue(undefined);
-    mockFsUnlink.mockResolvedValue(undefined);
+    mockRemoveFile.mockResolvedValue(undefined);
   });
 
   it('marks document as failed when extractText throws', async () => {
-    mockFsReadFile.mockResolvedValue(Buffer.from('data'));
+    mockDownloadFile.mockResolvedValue(Buffer.from('data'));
     mockExtractText.mockRejectedValue(new Error('PDF corrupt header'));
     const job = makeJob();
 
@@ -299,7 +297,7 @@ describe('documentWorker — failure handling', () => {
   });
 
   it('marks document as failed when embedBatch throws', async () => {
-    mockFsReadFile.mockResolvedValue(Buffer.from('data'));
+    mockDownloadFile.mockResolvedValue(Buffer.from('data'));
     mockExtractText.mockResolvedValue('Some text');
     mockCreateChunks.mockReturnValue(makeChunks(3));
     mockEmbedBatch.mockRejectedValue(new Error('HuggingFace rate limited'));
@@ -314,7 +312,7 @@ describe('documentWorker — failure handling', () => {
   });
 
   it('throws when document produces zero chunks', async () => {
-    mockFsReadFile.mockResolvedValue(Buffer.from('data'));
+    mockDownloadFile.mockResolvedValue(Buffer.from('data'));
     mockExtractText.mockResolvedValue('');
     mockCreateChunks.mockReturnValue([]);
     const job = makeJob();
@@ -322,20 +320,20 @@ describe('documentWorker — failure handling', () => {
     await expect(getProcessor()(job)).rejects.toThrow('zero chunks');
   });
 
-  it('cleans up the temp file even when processing fails', async () => {
-    mockFsReadFile.mockResolvedValue(Buffer.from('data'));
+  it('cleans up the staged file even when processing fails', async () => {
+    mockDownloadFile.mockResolvedValue(Buffer.from('data'));
     mockExtractText.mockRejectedValue(new Error('Extraction failed'));
     const job = makeJob();
 
     await expect(getProcessor()(job)).rejects.toThrow();
 
-    expect(mockFsUnlink).toHaveBeenCalledWith('/tmp/uploads/doc-uuid-111_report.pdf');
+    expect(mockRemoveFile).toHaveBeenCalledWith('doc-uuid-111_report.pdf');
   });
 
   it('does not re-throw cleanup errors that occur during failure path', async () => {
-    mockFsReadFile.mockResolvedValue(Buffer.from('data'));
+    mockDownloadFile.mockResolvedValue(Buffer.from('data'));
     mockExtractText.mockRejectedValue(new Error('parse error'));
-    mockFsUnlink.mockRejectedValue(new Error('ENOENT'));
+    mockRemoveFile.mockRejectedValue(new Error('ENOENT'));
     const job = makeJob();
 
     // Should still throw the original error, not the cleanup error
@@ -344,7 +342,7 @@ describe('documentWorker — failure handling', () => {
 
   it('re-throws the original error so BullMQ can apply retry backoff', async () => {
     const originalError = new Error('Supabase pgvector insert timeout');
-    mockFsReadFile.mockResolvedValue(Buffer.from('data'));
+    mockDownloadFile.mockResolvedValue(Buffer.from('data'));
     mockExtractText.mockResolvedValue('text');
     mockCreateChunks.mockReturnValue(makeChunks(2));
     mockEmbedBatch.mockResolvedValue(makeEmbeddings(2));
@@ -359,7 +357,7 @@ describe('documentWorker — failure handling', () => {
 describe('documentWorker — progress checkpoints', () => {
   it('does not emit any progress before text is extracted', async () => {
     let extractCalled = false;
-    mockFsReadFile.mockResolvedValue(Buffer.from('data'));
+    mockDownloadFile.mockResolvedValue(Buffer.from('data'));
     mockExtractText.mockImplementation(async () => {
       // Verify no progress has been emitted before this point
       extractCalled = true;
@@ -370,7 +368,7 @@ describe('documentWorker — progress checkpoints', () => {
     mockUpdateDocumentStatus.mockResolvedValue(undefined);
     mockUpsertChunks.mockResolvedValue(undefined);
     mockUpdateChunkCount.mockResolvedValue(undefined);
-    mockFsUnlink.mockResolvedValue(undefined);
+    mockRemoveFile.mockResolvedValue(undefined);
 
     const job = makeJob();
     const progressBeforeExtract: number[] = [];
@@ -385,14 +383,14 @@ describe('documentWorker — progress checkpoints', () => {
   });
 
   it('emits exactly 5 progress updates for a successful job', async () => {
-    mockFsReadFile.mockResolvedValue(Buffer.from('data'));
+    mockDownloadFile.mockResolvedValue(Buffer.from('data'));
     mockExtractText.mockResolvedValue('text');
     mockCreateChunks.mockReturnValue(makeChunks(2));
     mockEmbedBatch.mockResolvedValue(makeEmbeddings(2));
     mockUpdateDocumentStatus.mockResolvedValue(undefined);
     mockUpsertChunks.mockResolvedValue(undefined);
     mockUpdateChunkCount.mockResolvedValue(undefined);
-    mockFsUnlink.mockResolvedValue(undefined);
+    mockRemoveFile.mockResolvedValue(undefined);
 
     const job = makeJob();
     await getProcessor()(job);
@@ -404,8 +402,8 @@ describe('documentWorker — progress checkpoints', () => {
 describe('documentWorker — cancellation under retry race', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFsReadFile.mockResolvedValue(Buffer.from('data'));
-    mockFsUnlink.mockResolvedValue(undefined);
+    mockDownloadFile.mockResolvedValue(Buffer.from('data'));
+    mockRemoveFile.mockResolvedValue(undefined);
   });
 
   it('does not let a timed-out attempt clobber a subsequent retry\'s writes', async () => {

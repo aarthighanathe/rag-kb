@@ -6,11 +6,11 @@
  */
 
 import { Worker, UnrecoverableError, type Job } from 'bullmq';
-import fs from 'fs/promises';
 import { env } from '../../config/env.js';
 import { logger } from '../../utils/logger.js';
 import { extractText, createChunks } from '../../services/chunker.js';
 import { embedBatch } from '../../services/embedder.js';
+import { downloadFile, removeFile } from '../../services/storage.js';
 import {
   updateDocumentStatus,
   upsertChunks,
@@ -64,18 +64,18 @@ function withTimeout<T>(
 }
 
 /**
- * Deletes the temporary uploaded file from disk.
+ * Deletes the staged uploaded file from Supabase Storage.
  * Swallows errors so cleanup failures never mask the primary job outcome.
- * @param filePath - Absolute path to the temp file
+ * @param storageKey - Key of the staged file to remove
  * @param correlationId - Request correlation ID for log tracing
  */
-async function cleanupFile(filePath: string, correlationId: string): Promise<void> {
+async function cleanupFile(storageKey: string, correlationId: string): Promise<void> {
   try {
-    await fs.unlink(filePath);
-    logger.debug('Temp file deleted', { filePath, correlationId });
+    await removeFile(storageKey);
+    logger.debug('Staged file deleted', { storageKey, correlationId });
   } catch {
-    logger.warn('Failed to delete temp file — manual cleanup may be needed', {
-      filePath,
+    logger.warn('Failed to delete staged file — manual cleanup may be needed', {
+      storageKey,
       correlationId,
     });
   }
@@ -108,7 +108,7 @@ async function processDocumentJob(
   job: Job<DocumentJobData, DocumentJobResult>,
   signal: AbortSignal,
 ): Promise<DocumentJobResult> {
-  const { documentId, filePath, fileType, originalName, correlationId, userId } = job.data;
+  const { documentId, storageKey, fileType, originalName, correlationId, userId } = job.data;
   const jobLogger = logger.child({ jobId: job.id, documentId, correlationId, userId });
   const startTime = Date.now();
 
@@ -121,7 +121,7 @@ async function processDocumentJob(
     jobLogger.info('Document job started', { originalName, fileType });
 
     // ── Step 1: Extract text (20%) ─────────────────────────────────────────
-    const fileBuffer = await fs.readFile(filePath);
+    const fileBuffer = await downloadFile(storageKey);
     const rawText = await extractText(fileBuffer, fileType);
     await job.updateProgress(20);
     jobLogger.debug('Text extracted', { charCount: rawText.length });
@@ -155,7 +155,7 @@ async function processDocumentJob(
 
     // ── Step 5: Mark ready, clean up (100%) ──────────────────────────────
     await updateDocumentStatus(documentId, 'ready', undefined, signal);
-    await cleanupFile(filePath, correlationId);
+    await cleanupFile(storageKey, correlationId);
     await job.updateProgress(100);
 
     const processingTimeMs = Date.now() - startTime;
@@ -170,7 +170,7 @@ async function processDocumentJob(
       jobLogger.warn('Document job attempt cancelled — exiting without further writes', {
         reason: err.message,
       });
-      await cleanupFile(filePath, correlationId);
+      await cleanupFile(storageKey, correlationId);
       const processingTimeMs = Date.now() - startTime;
       return { chunkCount: 0, processingTimeMs };
     }
@@ -190,7 +190,7 @@ async function processDocumentJob(
         });
       }
     }
-    await cleanupFile(filePath, correlationId);
+    await cleanupFile(storageKey, correlationId);
     throw err;
   }
 }

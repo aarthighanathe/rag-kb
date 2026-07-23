@@ -117,11 +117,10 @@ vi.mock('@services/llm', () => ({
   }),
 }));
 
-vi.mock('fs/promises', () => ({
-  writeFile: vi.fn().mockResolvedValue(undefined),
-  mkdir:     vi.fn().mockResolvedValue(undefined),
-  readFile:  vi.fn().mockResolvedValue(Buffer.from('Smoke test document content for chunking.')),
-  unlink:    vi.fn().mockResolvedValue(undefined),
+vi.mock('@services/storage', () => ({
+  uploadFile: vi.fn().mockResolvedValue(undefined),
+  downloadFile: vi.fn().mockResolvedValue(Buffer.from('Smoke test document content for chunking.')),
+  removeFile: vi.fn().mockResolvedValue(undefined),
 }));
 
 // ─── Test Setup ───────────────────────────────────────────────────────────────

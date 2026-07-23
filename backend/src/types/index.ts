@@ -111,7 +111,7 @@ export interface SourceCitation {
 /** BullMQ job data payload for document processing. */
 export interface DocumentJobData {
   documentId: string;
-  filePath: string;
+  storageKey: string;
   fileType: FileType;
   originalName: string;
   correlationId: string;

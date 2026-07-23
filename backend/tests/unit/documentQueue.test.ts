@@ -61,7 +61,7 @@ import type { DocumentJobData } from '@types/index';
 function makeJobData(overrides: Partial<DocumentJobData> = {}): DocumentJobData {
   return {
     documentId: 'doc-uuid-123',
-    filePath: '/tmp/uploads/doc-uuid-123_report.pdf',
+    storageKey: 'doc-uuid-123_report.pdf',
     fileType: 'pdf',
     originalName: 'report.pdf',
     correlationId: 'corr-abc-456',
