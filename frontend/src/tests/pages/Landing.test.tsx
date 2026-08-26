@@ -27,7 +27,7 @@ describe('Landing — minimal header', () => {
   it('renders a header with the logo link', () => {
     renderLanding();
     expect(screen.getByRole('banner')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /rag kb/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /lumina/i })).toBeInTheDocument();
   });
 
   it('does NOT render the AppHeader tab navigation', () => {

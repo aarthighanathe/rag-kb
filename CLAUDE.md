@@ -32,7 +32,7 @@ the codebase after your task, the task is NOT complete.
 
 ## Project Overview
 
-**RAG Knowledge Base** — A production-grade Retrieval-Augmented Generation system where users upload documents (PDF, TXT, MD, DOCX). Documents are chunked, embedded via HuggingFace (`sentence-transformers/all-MiniLM-L6-v2`), stored in Supabase pgvector, and queried via Groq LLM (`llama-3.1-8b-instant`) with streamed answers and source citations.
+**Lumina** — A production-grade Retrieval-Augmented Generation system where users upload documents (PDF, TXT, MD, DOCX, HTML). Documents are chunked, embedded via HuggingFace (`sentence-transformers/all-MiniLM-L6-v2`), stored in Supabase pgvector, and queried via Groq LLM (`llama-3.1-8b-instant`) with streamed answers and source citations.
 
 ---
 
@@ -245,7 +245,7 @@ Express 5 chosen for its ecosystem maturity, widespread familiarity, and native 
 Single PostgreSQL-native database for both relational data and vector embeddings. Reduces operational complexity and keeps data co-located for JOIN operations between documents and chunks.
 
 ### ADR-003: BullMQ for Document Processing
-Document ingestion (parse → chunk → embed → store) is CPU-intensive and can take 5–30 seconds per file. BullMQ prevents HTTP timeout, enables retry on failure, and provides visibility via Bull Board.
+Document ingestion (parse → chunk → embed → store) is CPU-intensive and can take 5–30 seconds per file. BullMQ prevents HTTP timeout and enables retry on failure. Job visibility is via `GET /api/queue/status` / `GET /api/queue/job/:jobId` (admin-secret-gated); a dedicated dashboard like Bull Board is not currently wired in — see FEATURES.md Known Issues.
 
 ### ADR-004: HuggingFace over OpenAI Embeddings
 `all-MiniLM-L6-v2` is free-tier compatible, produces 384-dimensional vectors (small storage footprint), and delivers strong semantic similarity performance for knowledge-base retrieval at this scale.

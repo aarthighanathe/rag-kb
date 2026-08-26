@@ -268,7 +268,7 @@ test.describe('Chat page', () => {
     await exportButton.click();
 
     const download = await downloadPromise;
-    expect(download.suggestedFilename()).toMatch(/^rag-kb-conversation-\d{4}-\d{2}-\d{2}\.md$/);
+    expect(download.suggestedFilename()).toMatch(/^lumina-conversation-\d{4}-\d{2}-\d{2}\.md$/);
   });
 
   // ─── Keyboard Shortcut Tests ─────────────────────────────────────────────────────

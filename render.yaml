@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: rag-kb-backend
+    name: lumina-backend
     runtime: node
     region: oregon
     plan: free

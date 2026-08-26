@@ -30,9 +30,9 @@ describe('AppHeader — structure', () => {
     expect(screen.getByRole('banner')).toBeInTheDocument();
   });
 
-  it('renders the RAG KB logo link pointing to Upload', () => {
+  it('renders the Lumina logo link pointing to Upload', () => {
     renderHeader();
-    const logo = screen.getByRole('link', { name: /rag kb.*upload/i });
+    const logo = screen.getByRole('link', { name: /lumina.*upload/i });
     expect(logo).toBeInTheDocument();
     expect(logo).toHaveAttribute('href', '/upload');
   });
@@ -40,7 +40,7 @@ describe('AppHeader — structure', () => {
   it('renders tablist with three tabs', () => {
     renderHeader();
     const tabList = screen.getByRole('tablist', { name: /main sections/i });
-    const tabs    = screen.getAllByRole('tab');
+    const tabs = screen.getAllByRole('tab');
     expect(tabList).toBeInTheDocument();
     expect(tabs).toHaveLength(3);
   });
@@ -90,7 +90,7 @@ describe('AppHeader — keyboard navigation', () => {
   it('ArrowRight moves focus from Upload to Chat tab', async () => {
     renderHeader('/upload');
     const uploadTab = screen.getByRole('tab', { name: /upload/i });
-    const chatTab   = screen.getByRole('tab', { name: /chat/i });
+    const chatTab = screen.getByRole('tab', { name: /chat/i });
 
     uploadTab.focus();
     await userEvent.keyboard('{ArrowRight}');
@@ -100,7 +100,7 @@ describe('AppHeader — keyboard navigation', () => {
 
   it('ArrowLeft moves focus from Chat to Upload tab', async () => {
     renderHeader('/chat');
-    const chatTab   = screen.getByRole('tab', { name: /chat/i });
+    const chatTab = screen.getByRole('tab', { name: /chat/i });
     const uploadTab = screen.getByRole('tab', { name: /upload/i });
 
     chatTab.focus();
@@ -112,7 +112,7 @@ describe('AppHeader — keyboard navigation', () => {
   it('Home key moves focus to first tab', async () => {
     renderHeader('/documents');
     const documentsTab = screen.getByRole('tab', { name: /documents/i });
-    const uploadTab    = screen.getByRole('tab', { name: /upload/i });
+    const uploadTab = screen.getByRole('tab', { name: /upload/i });
 
     documentsTab.focus();
     await userEvent.keyboard('{Home}');
@@ -122,7 +122,7 @@ describe('AppHeader — keyboard navigation', () => {
 
   it('End key moves focus to last tab', async () => {
     renderHeader('/upload');
-    const uploadTab    = screen.getByRole('tab', { name: /upload/i });
+    const uploadTab = screen.getByRole('tab', { name: /upload/i });
     const documentsTab = screen.getByRole('tab', { name: /documents/i });
 
     uploadTab.focus();
@@ -134,7 +134,7 @@ describe('AppHeader — keyboard navigation', () => {
   it('ArrowRight wraps from last tab to first', async () => {
     renderHeader('/documents');
     const documentsTab = screen.getByRole('tab', { name: /documents/i });
-    const uploadTab    = screen.getByRole('tab', { name: /upload/i });
+    const uploadTab = screen.getByRole('tab', { name: /upload/i });
 
     documentsTab.focus();
     await userEvent.keyboard('{ArrowRight}');

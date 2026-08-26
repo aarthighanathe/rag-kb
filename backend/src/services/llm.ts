@@ -24,6 +24,57 @@ const DEFAULT_TEMPERATURE = 0.1;
 /** Maximum number of conversation turns (user+assistant pairs) to retain. */
 const MAX_HISTORY_EXCHANGES = 3;
 
+/**
+ * Per-chunk similarity band thresholds, mirroring
+ * frontend/src/utils/calculateConfidence.ts's THRESHOLDS exactly so the
+ * relevance label shown to the LLM and the confidence badge shown to the
+ * user always agree on what "high"/"medium"/"low" means for this model.
+ * Recalibrated for all-MiniLM-L6-v2's low, spread-out cosine scores (a
+ * "strong" match here is ~0.25-0.40, not 0.7-0.9 as with OpenAI embeddings).
+ * Exported so external consumers can reference the same values.
+ */
+export const RELEVANCE_BAND_THRESHOLDS = {
+  high: 0.25,
+  medium: 0.12,
+  low: 0.04,
+} as const;
+
+/**
+ * Thresholds for keyword (pg_trgm) chunks, tuned separately from the MiniLM
+ * cosine thresholds. pg_trgm similarity scores sit on a different scale to
+ * cosine similarity (a 0.30 trigram score is "moderate" overlap, not "high"
+ * as it would be for MiniLM cosine), so applying the vector thresholds to
+ * keyword chunks would inflate relevance labels.
+ *
+ * These are intentionally more conservative than RELEVANCE_BAND_THRESHOLDS:
+ * a pg_trgm score needs to be quite high (>= 0.60) before it's as informative
+ * as a high cosine match.
+ */
+const KEYWORD_BAND_THRESHOLDS = {
+  high: 0.6,
+  medium: 0.35,
+  low: 0.15,
+} as const;
+
+type RelevanceBand = 'high' | 'medium' | 'low' | 'very-low';
+
+/**
+ * Classifies a single chunk's similarity score into the same band vocabulary
+ * used by the frontend confidence indicator, using the correct threshold set
+ * for the chunk's retrieval source so a trigram score and a cosine score are
+ * never compared against the same absolute cutoff table.
+ * @param similarity - Raw similarity score for one retrieved chunk (0-1)
+ * @param source - Which retrieval method produced the score ('vector' | 'keyword')
+ * @returns The relevance band label
+ */
+function classifyRelevanceBand(similarity: number, source: 'vector' | 'keyword'): RelevanceBand {
+  const thresholds = source === 'keyword' ? KEYWORD_BAND_THRESHOLDS : RELEVANCE_BAND_THRESHOLDS;
+  if (similarity >= thresholds.high) return 'high';
+  if (similarity >= thresholds.medium) return 'medium';
+  if (similarity >= thresholds.low) return 'low';
+  return 'very-low';
+}
+
 let _groq: Groq | null = null;
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
@@ -58,9 +109,11 @@ export interface StreamOptions {
 
 /**
  * Returns a singleton Groq client, initialised lazily.
+ * Exported so modules that need a Groq client (e.g. queryRewriter.ts)
+ * can reuse this instead of defining their own duplicate singleton.
  * @returns Authenticated Groq client
  */
-function getGroqClient(): Groq {
+export function getGroqClient(): Groq {
   if (!_groq) {
     _groq = new Groq({ apiKey: env.GROQ_API_KEY });
   }
@@ -75,24 +128,72 @@ function getGroqClient(): Groq {
  */
 export function buildSystemPrompt(): string {
   return [
-    'You are a precise knowledge-base assistant.',
-    'Rules:',
-    '- Answer ONLY from the provided context. Do not use prior knowledge.',
-    '- If the context does not contain the answer, say so explicitly.',
-    '- Cite sources using the bracketed number shown before each passage below, e.g. [1] or [2]. Do not invent numbers or cite filenames directly.',
-    '- Be concise and factually precise.',
-    '- Never hallucinate or fabricate details.',
+    'You are a precise knowledge-base assistant specializing in accurate, source-cited answers.',
+    '',
+    'Core Principles:',
+    '- Answer ONLY from the provided context. Never use outside knowledge.',
+    '- If the context does not contain the answer, say so explicitly and clearly.',
+    '- Cite sources using the bracketed number shown before each passage, e.g. [1] or [2].',
+    '- Each passage has a relevance band (high/medium/low/very-low) indicating semantic match quality.',
+    '- When evidence is weak (low/very-low relevance), acknowledge this uncertainty.',
+    '- When sources disagree, present all sides with citations rather than choosing one.',
+    '- Be concise but complete. Use bullet points for multi-part answers when appropriate.',
+    '- Never hallucinate, fabricate, or fill in missing information.',
+    '',
+    'Answer Structure Guidelines:',
+    '- Start with a direct answer when possible.',
+    '- Use bullet points for lists or multiple related items.',
+    '- Include citations after each factual claim.',
+    '- End with a brief summary if the answer is complex.',
+    '- For partial answers, explicitly state what information is missing.',
+    '',
+    'Few-Shot Examples:',
+    '',
+    'Example 1 - Direct Answer with High Confidence:',
+    'Context: [1] (source: policy.pdf, relevance: high) Refunds are issued within 14 days of the return request. [2] (source: policy.pdf, relevance: high) Refunds are processed to the original payment method.',
+    'Question: How long do refunds take?',
+    'Answer: Refunds are issued within 14 days of the return request [1] and are processed to the original payment method [2].',
+    '',
+    'Example 2 - Low Confidence Rejection:',
+    'Context: [1] (source: notes.txt, relevance: very-low) The meeting covered budget planning for next quarter.',
+    'Question: What is the refund policy?',
+    'Answer: The knowledge base does not clearly cover this question. The closest passage found [1] discusses budget planning, not refunds. I cannot provide an answer from the available context.',
+    '',
+    'Example 3 - Conflicting Sources:',
+    'Context: [1] (source: handbook-v1.pdf, relevance: high) Employees get 15 vacation days per year. [2] (source: handbook-v2.pdf, relevance: high) Employees get 20 vacation days per year.',
+    'Question: How many vacation days do employees get?',
+    'Answer: The sources disagree on vacation policy: [1] states 15 days per year, while [2] states 20 days per year. You may need to confirm which version is current.',
+    '',
+    'Example 4 - Partial Information:',
+    'Context: [1] (source: pricing.pdf, relevance: high) Basic plan costs $10/month. [2] (source: pricing.pdf, relevance: high) Premium plan includes unlimited storage.',
+    'Question: What are the pricing tiers?',
+    'Answer: Based on the available context: Basic plan costs $10/month [1], and Premium plan includes unlimited storage [2]. The document does not provide complete information about all pricing tiers or the Premium plan cost.',
+    '',
+    'Example 5 - Multi-part Answer with Bullets:',
+    'Context: [1] (source: onboarding.pdf, relevance: high) New employees complete orientation on day 1. [2] (source: onboarding.pdf, relevance: high) IT setup occurs on day 2. [3] (source: onboarding.pdf, relevance: high) Team introductions happen on day 3.',
+    'Question: What is the new employee onboarding schedule?',
+    'Answer: The onboarding schedule spans three days: Day 1: orientation [1], Day 2: IT setup [2], Day 3: team introductions [3].',
+    '',
+    'Example 6 - Mixed Relevance Handling:',
+    'Context: [1] (source: report.pdf, relevance: high) Q3 revenue was $2.5M. [2] (source: notes.txt, relevance: low) Q4 projections are optimistic.',
+    'Question: What was Q4 revenue?',
+    'Answer: The knowledge base does not contain Q4 revenue figures. While [2] mentions Q4 projections are optimistic, this is marked as low relevance and does not provide specific numbers. [1] only covers Q3 revenue ($2.5M).',
   ].join('\n');
 }
 
 /**
  * Formats retrieved chunks into the numbered context block injected into the user prompt.
+ * Each passage is labelled with a relevance band (see classifyRelevanceBand) so the
+ * model's tone can track actual retrieval confidence instead of being blind to it.
  * @param chunks - Retrieved document chunks
  * @returns Formatted context string with source annotations
  */
 export function buildContextString(chunks: MatchChunksResult[]): string {
   return chunks
-    .map((chunk, i) => `[${i + 1}] (source: ${chunk.filename})\n${chunk.content}`)
+    .map((chunk, i) => {
+      const band = classifyRelevanceBand(chunk.similarity, chunk.source);
+      return `[${i + 1}] (source: ${chunk.filename}, relevance: ${band})\n${chunk.content}`;
+    })
     .join('\n\n---\n\n');
 }
 
@@ -160,9 +261,8 @@ export function buildMessages(
 ): Groq.Chat.ChatCompletionMessageParam[] {
   // Cap at last MAX_HISTORY_EXCHANGES exchanges (2 msgs each = 6 msgs max)
   const maxMsgs = MAX_HISTORY_EXCHANGES * 2;
-  const cappedHistory = history.length > maxMsgs
-    ? history.slice(history.length - maxMsgs)
-    : history;
+  const cappedHistory =
+    history.length > maxMsgs ? history.slice(history.length - maxMsgs) : history;
 
   const contextStr = buildContextString(context.chunks);
   const historyBlock = formatHistoryAsUntrustedContext(cappedHistory);
@@ -198,6 +298,66 @@ export function extractCitations(chunks: MatchChunksResult[]): SourceCitation[] 
     similarity: Math.round(chunk.similarity * 1000) / 1000,
     excerpt: chunk.content.slice(0, 200) + (chunk.content.length > 200 ? '…' : ''),
   }));
+}
+
+/**
+ * Matches a `[N]` bracket citation marker in the model's raw output text.
+ * Excludes two lookalikes that aren't real citations:
+ *  - Markdown footnote/reference-link definitions, e.g. `[1]: http://example.com`
+ *    (a `[N]` immediately followed by `:` — never how this app's citations render).
+ *  - Array-index-style code references, e.g. `arr[1]` (a `[N]` immediately preceded
+ *    by an identifier character — a real citation marker always stands alone).
+ * Neither exclusion can cause a genuine citation to be missed: the system prompt
+ * only ever instructs the model to emit bare `[N]` markers, which match neither
+ * excluded pattern.
+ */
+const CITED_INDEX_REGEX = /(?<![\w])\[(\d+)\](?!:)/g;
+
+/**
+ * Extracts the set of 1-based citation numbers the model actually used in its
+ * generated answer text, e.g. "...as shown in [1] and [3]." -> [1, 3].
+ * Duplicate markers collapse to a single entry; order is first-appearance.
+ * @param text - The model's full generated answer text
+ * @returns Distinct 1-based indices referenced via `[N]` markers
+ */
+export function extractCitedIndices(text: string): number[] {
+  const seen = new Set<number>();
+  for (const match of text.matchAll(CITED_INDEX_REGEX)) {
+    const n = Number(match[1]);
+    if (Number.isInteger(n) && n > 0) seen.add(n);
+  }
+  return Array.from(seen);
+}
+
+/**
+ * Filters a full citation list down to only the entries the model actually
+ * referenced in its generated text, dropping any out-of-range (hallucinated)
+ * marker numbers. Falls back to the full list when the model cited nothing —
+ * an answer with no `[N]` markers isn't necessarily wrong, and showing all
+ * retrieved sources is more useful than showing none.
+ * @param citations - Full citation list, in retrieval order (index 0 = [1])
+ * @param modelText - The model's full generated answer text
+ * @returns Citations the model actually cited, in original retrieval order
+ */
+export function filterCitationsByModelOutput(
+  citations: SourceCitation[],
+  modelText: string,
+): SourceCitation[] {
+  const citedIndices = extractCitedIndices(modelText);
+  if (citedIndices.length === 0) return citations;
+
+  const inRange = citedIndices.filter((n) => n >= 1 && n <= citations.length);
+  const outOfRange = citedIndices.filter((n) => n < 1 || n > citations.length);
+  if (outOfRange.length > 0) {
+    logger.warn('Model cited out-of-range citation numbers', {
+      outOfRange,
+      availableCount: citations.length,
+    });
+  }
+  if (inRange.length === 0) return citations;
+
+  const citedSet = new Set(inRange);
+  return citations.filter((_, i) => citedSet.has(i + 1));
 }
 
 // ─── Callback-Based Streaming ─────────────────────────────────────────────────

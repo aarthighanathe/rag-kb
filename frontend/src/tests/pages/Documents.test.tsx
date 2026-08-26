@@ -20,47 +20,81 @@ import type { DocumentRecord } from '../../services/api';
 
 vi.mock('../../stores/ragStore', () => ({ useRagStore: vi.fn() }));
 
+const { getDocumentSimilarityMock } = vi.hoisted(() => ({
+  getDocumentSimilarityMock: vi
+    .fn()
+    .mockResolvedValue({ pairs: [], documents: [], capped: false, readyDocumentCount: 0 }),
+}));
+vi.mock('../../services/api', async () => {
+  const actual = await vi.importActual<typeof import('../../services/api')>('../../services/api');
+  return { ...actual, getDocumentSimilarity: getDocumentSimilarityMock };
+});
+
 vi.mock('../../contexts/ToastContext', () => ({
   useAppToast: () => ({ toast: vi.fn(), dismiss: vi.fn(), dismissAll: vi.fn(), toasts: [] }),
 }));
 
 const deleteDocumentMock = vi.fn().mockResolvedValue(undefined);
 const fetchDocumentsMock = vi.fn().mockResolvedValue(undefined);
+const updateDocumentTagsMock = vi.fn().mockResolvedValue(undefined);
 
 const sampleDocs: DocumentRecord[] = [
   {
-    id: 'doc-1', filename: 'annual_report.pdf', mime_type: 'application/pdf',
-    size_bytes: 204_800, status: 'ready', chunk_count: 12,
-    created_at: '2026-06-10T10:00:00Z', updated_at: '2026-06-10T10:00:00Z',
+    id: 'doc-1',
+    filename: 'annual_report.pdf',
+    mime_type: 'application/pdf',
+    size_bytes: 204_800,
+    status: 'ready',
+    chunk_count: 12,
+    created_at: '2026-06-10T10:00:00Z',
+    updated_at: '2026-06-10T10:00:00Z',
+    tags: [],
   },
   {
-    id: 'doc-2', filename: 'notes.md', mime_type: 'text/markdown',
-    size_bytes: 1024, status: 'processing', chunk_count: 0,
-    created_at: '2026-06-14T08:00:00Z', updated_at: '2026-06-14T08:00:00Z',
+    id: 'doc-2',
+    filename: 'notes.md',
+    mime_type: 'text/markdown',
+    size_bytes: 1024,
+    status: 'processing',
+    chunk_count: 0,
+    created_at: '2026-06-14T08:00:00Z',
+    updated_at: '2026-06-14T08:00:00Z',
+    tags: [],
   },
   {
-    id: 'doc-3', filename: 'spec.docx',
+    id: 'doc-3',
+    filename: 'spec.docx',
     mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    size_bytes: 51_200, status: 'failed', chunk_count: 0,
-    created_at: '2026-06-15T12:00:00Z', updated_at: '2026-06-15T12:00:00Z',
+    size_bytes: 51_200,
+    status: 'failed',
+    chunk_count: 0,
+    created_at: '2026-06-15T12:00:00Z',
+    updated_at: '2026-06-15T12:00:00Z',
     error_message: 'Parsing error',
+    tags: [],
   },
 ];
 
 function buildStore(overrides: object = {}) {
   return {
-    documents:        sampleDocs,
+    documents: sampleDocs,
     documentsLoading: false,
-    documentsError:   null,
-    fetchDocuments:   fetchDocumentsMock,
-    deleteDocument:   deleteDocumentMock,
+    documentsError: null,
+    fetchDocuments: fetchDocumentsMock,
+    deleteDocument: deleteDocumentMock,
+    updateDocumentTags: updateDocumentTagsMock,
     ...overrides,
   };
 }
 
 function renderDocuments(storeOverrides: object = {}) {
-  (useRagStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
-    buildStore(storeOverrides),
+  const state = buildStore(storeOverrides);
+  // Mimic real Zustand selector behavior (unlike a flat mockReturnValue) so
+  // that components selecting a single field — e.g. TagEditor's
+  // `useRagStore((s) => s.updateDocumentTags)` — receive that field itself,
+  // not the whole state object.
+  (useRagStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+    (selector?: (s: object) => unknown) => (selector ? selector(state) : state),
   );
   return render(
     <MemoryRouter>
@@ -184,7 +218,10 @@ describe('Documents page — error state', () => {
 
 describe('Documents page — connection error state', () => {
   it('shows a dedicated "can\'t reach the server" state instead of "Archive is empty" when fetch fails with no cached documents', () => {
-    renderDocuments({ documents: [], documentsError: 'Could not reach the server. Ensure the backend is running on port 3000.' });
+    renderDocuments({
+      documents: [],
+      documentsError: 'Could not reach the server. Ensure the backend is running on port 3000.',
+    });
     expect(screen.getByText(/can't reach the server/i)).toBeInTheDocument();
     expect(screen.queryByText(/archive is empty/i)).not.toBeInTheDocument();
   });
@@ -303,6 +340,151 @@ describe('Documents page — expand row (table view)', () => {
     await userEvent.click(nameBtn);
     await userEvent.click(nameBtn);
     expect(screen.queryByText(/chunk 1/i)).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tag editing (expanded row, table view)
+// ---------------------------------------------------------------------------
+
+describe('Documents page — tag editing', () => {
+  async function expandFirstRow() {
+    renderDocuments();
+    await switchToTableView();
+    const nameBtn = screen.getByRole('button', { name: /expand.*annual_report\.pdf/i });
+    await userEvent.click(nameBtn);
+  }
+
+  it('shows an "Add tag" input in the expanded row', async () => {
+    await expandFirstRow();
+    expect(screen.getByLabelText(/new tag/i)).toBeInTheDocument();
+  });
+
+  it('adds a tag when typed and Enter is pressed', async () => {
+    await expandFirstRow();
+    const input = screen.getByLabelText(/new tag/i);
+    await userEvent.type(input, 'pricing{Enter}');
+    expect(updateDocumentTagsMock).toHaveBeenCalledWith('doc-1', ['pricing']);
+  });
+
+  it('adds a tag when the add button is clicked', async () => {
+    await expandFirstRow();
+    const input = screen.getByLabelText(/new tag/i);
+    await userEvent.type(input, 'onboarding');
+    await userEvent.click(screen.getByRole('button', { name: /^add tag$/i }));
+    expect(updateDocumentTagsMock).toHaveBeenCalledWith('doc-1', ['onboarding']);
+  });
+
+  it('does not submit a blank or whitespace-only tag', async () => {
+    await expandFirstRow();
+    const input = screen.getByLabelText(/new tag/i);
+    await userEvent.type(input, '   {Enter}');
+    expect(updateDocumentTagsMock).not.toHaveBeenCalled();
+  });
+
+  it('removes an existing tag when its remove button is clicked', async () => {
+    renderDocuments({
+      documents: sampleDocs.map((d) => (d.id === 'doc-1' ? { ...d, tags: ['pricing', 'faq'] } : d)),
+    });
+    await switchToTableView();
+    const nameBtn = screen.getByRole('button', { name: /expand.*annual_report\.pdf/i });
+    await userEvent.click(nameBtn);
+
+    await userEvent.click(screen.getByRole('button', { name: /remove tag pricing/i }));
+    expect(updateDocumentTagsMock).toHaveBeenCalledWith('doc-1', ['faq']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Near-duplicate suggestion banner
+// ---------------------------------------------------------------------------
+
+describe('Documents page — near-duplicate suggestions', () => {
+  // The banner's fetch requires at least 2 'ready' documents — sampleDocs only
+  // has one ('doc-1'), so these tests mark 'doc-3' ready too.
+  const twoReadyDocs = sampleDocs.map((d) =>
+    d.id === 'doc-3' ? { ...d, status: 'ready' as const } : d,
+  );
+
+  it('does not show a duplicate banner when no pairs are returned', async () => {
+    getDocumentSimilarityMock.mockResolvedValue({
+      pairs: [],
+      documents: [],
+      capped: false,
+      readyDocumentCount: 2,
+    });
+    renderDocuments({ documents: twoReadyDocs });
+    await waitFor(() => expect(getDocumentSimilarityMock).toHaveBeenCalled());
+    expect(screen.queryByLabelText(/possible duplicate documents/i)).not.toBeInTheDocument();
+  });
+
+  it('shows a banner naming both files when a near-duplicate pair is found', async () => {
+    getDocumentSimilarityMock.mockResolvedValue({
+      pairs: [{ documentA: 'doc-1', documentB: 'doc-3', similarity: 0.95 }],
+      documents: [],
+    });
+    renderDocuments({ documents: twoReadyDocs });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/possible duplicate documents/i)).toBeInTheDocument();
+    });
+    const banner = screen.getByLabelText(/possible duplicate documents/i);
+    expect(within(banner).getByText(/annual_report\.pdf/)).toBeInTheDocument();
+    expect(within(banner).getByText(/spec\.docx/)).toBeInTheDocument();
+    expect(within(banner).getByText(/95%/)).toBeInTheDocument();
+  });
+
+  it('dismisses a pair when its Dismiss button is clicked', async () => {
+    getDocumentSimilarityMock.mockResolvedValue({
+      pairs: [{ documentA: 'doc-1', documentB: 'doc-3', similarity: 0.95 }],
+      documents: [],
+    });
+    renderDocuments({ documents: twoReadyDocs });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/possible duplicate documents/i)).toBeInTheDocument();
+    });
+    await userEvent.click(screen.getByRole('button', { name: /dismiss duplicate suggestion/i }));
+    expect(screen.queryByLabelText(/possible duplicate documents/i)).not.toBeInTheDocument();
+  });
+
+  it('requests similarity with a high near-duplicate threshold, not the relation-map default', async () => {
+    getDocumentSimilarityMock.mockResolvedValue({
+      pairs: [],
+      documents: [],
+      capped: false,
+      readyDocumentCount: 2,
+    });
+    renderDocuments({ documents: twoReadyDocs });
+    await waitFor(() => expect(getDocumentSimilarityMock).toHaveBeenCalled());
+    expect(getDocumentSimilarityMock).toHaveBeenCalledWith(expect.any(Number));
+    const [threshold] = getDocumentSimilarityMock.mock.calls[0] as [number];
+    expect(threshold).toBeGreaterThanOrEqual(0.9);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Relation map — corpus too large to compute
+// ---------------------------------------------------------------------------
+
+describe('Documents page — relation map size cap', () => {
+  const twoReadyDocs = sampleDocs.map((d) =>
+    d.id === 'doc-3' ? { ...d, status: 'ready' as const } : d,
+  );
+
+  it('shows "Too many documents to map" instead of the graph when the backend reports capped', async () => {
+    getDocumentSimilarityMock.mockResolvedValue({
+      pairs: [],
+      documents: [],
+      capped: true,
+      readyDocumentCount: 151,
+    });
+    renderDocuments({ documents: twoReadyDocs });
+    await userEvent.click(screen.getByRole('button', { name: /relation map view/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/too many documents to map/i)).toBeInTheDocument();
+    });
   });
 });
 

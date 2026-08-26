@@ -65,8 +65,11 @@ export default [
       parserOptions: {
         ecmaVersion: 2022,
         sourceType: 'module',
-        // Tests are excluded from tsconfig.json rootDir — use a separate include
-        project: resolve(__dirname, 'tsconfig.json'),
+        // tsconfig.json excludes tests/ entirely, so linting against it made
+        // every test file fail to parse ("file not found in any project").
+        // tsconfig.test.json extends tsconfig.json and additionally includes
+        // tests/**/* — the same file the type-check:tests script uses.
+        project: resolve(__dirname, 'tsconfig.test.json'),
         tsconfigRootDir: __dirname,
       },
     },

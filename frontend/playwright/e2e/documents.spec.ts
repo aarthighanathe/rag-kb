@@ -52,6 +52,15 @@ async function mockDocumentsList(
   });
 }
 
+/**
+ * Switches the Documents page to table view, where each document renders as a
+ * `[data-testid="document-row"]` (grid view, the page's default, renders
+ * `[data-testid="document-card"]` instead).
+ */
+async function switchToTableView(page: import('@playwright/test').Page) {
+  await page.locator('[aria-label="Table view"]').click();
+}
+
 /** Intercepts DELETE /api/documents/:id and returns success. */
 async function mockDeleteDocument(page: import('@playwright/test').Page, deletedId: string) {
   await page.route(`**/api/documents/${deletedId}`, async (route) => {
@@ -84,6 +93,7 @@ test.describe('Documents page', () => {
   test('shows document rows when documents exist', async ({ page }) => {
     await mockDocumentsList(page, [DOC_READY, DOC_PROCESSING]);
     await page.goto('/documents');
+    await switchToTableView(page);
 
     const rows = page.locator('[data-testid="document-row"]');
     await expect(rows).toHaveCount(2);
@@ -92,6 +102,7 @@ test.describe('Documents page', () => {
   test('shows a ready status badge for a ready document', async ({ page }) => {
     await mockDocumentsList(page, [DOC_READY]);
     await page.goto('/documents');
+    await switchToTableView(page);
 
     await expect(page.locator('[data-testid="status-badge-ready"]')).toBeVisible();
   });
@@ -99,6 +110,7 @@ test.describe('Documents page', () => {
   test('shows a status badge for a processing document', async ({ page }) => {
     await mockDocumentsList(page, [DOC_PROCESSING]);
     await page.goto('/documents');
+    await switchToTableView(page);
 
     // Processing docs use the generic 'status-badge' testid (not 'status-badge-ready')
     await expect(page.locator('[data-testid="status-badge"]')).toBeVisible();
@@ -107,6 +119,7 @@ test.describe('Documents page', () => {
   test('displays the filename in each document row', async ({ page }) => {
     await mockDocumentsList(page, [DOC_READY, DOC_PROCESSING]);
     await page.goto('/documents');
+    await switchToTableView(page);
 
     await expect(page.locator('[data-testid="document-row"]').nth(0)).toContainText('annual-report.pdf');
     await expect(page.locator('[data-testid="document-row"]').nth(1)).toContainText('meeting-notes.txt');
@@ -115,6 +128,7 @@ test.describe('Documents page', () => {
   test('clicking delete opens the confirmation modal', async ({ page }) => {
     await mockDocumentsList(page, [DOC_READY]);
     await page.goto('/documents');
+    await switchToTableView(page);
 
     await page.locator('[data-testid="delete-button"]').first().click();
 
@@ -124,6 +138,7 @@ test.describe('Documents page', () => {
   test('cancelling delete closes the modal and keeps the row', async ({ page }) => {
     await mockDocumentsList(page, [DOC_READY, DOC_PROCESSING]);
     await page.goto('/documents');
+    await switchToTableView(page);
 
     await page.locator('[data-testid="delete-button"]').first().click();
     await expect(page.locator('[data-testid="confirm-modal"]')).toBeVisible();
@@ -174,6 +189,7 @@ test.describe('Documents page', () => {
     });
 
     await page.goto('/documents');
+    await switchToTableView(page);
     await expect(page.locator('[data-testid="document-row"]')).toHaveCount(2);
 
     // Click delete on the first row
@@ -202,6 +218,7 @@ test.describe('Documents page', () => {
     });
 
     await page.goto('/documents');
+    await switchToTableView(page);
     await expect(page.locator('[data-testid="document-row"]')).toHaveCount(1);
 
     // Trigger a manual refresh

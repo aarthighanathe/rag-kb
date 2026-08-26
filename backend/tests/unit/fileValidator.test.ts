@@ -169,6 +169,19 @@ describe('validateFile', () => {
     expect(result.fileType).toBe('docx');
   });
 
+  it('accepts a valid HTML buffer with a .html extension', async () => {
+    const buf = Buffer.from('<html><body><p>Hello</p></body></html>');
+    const result = await validateFile(buf, 'page.html', 10);
+    expect(result.fileType).toBe('html');
+    expect(result.mimeType).toBe('text/html');
+  });
+
+  it('accepts a valid HTML buffer with a .htm extension', async () => {
+    const buf = Buffer.from('<html><body><p>Hello</p></body></html>');
+    const result = await validateFile(buf, 'page.htm', 10);
+    expect(result.fileType).toBe('html');
+  });
+
   it('throws FileValidationError when the file is too large', async () => {
     const buf = makeBuf(PDF_MAGIC, 11 * 1024 * 1024);
     await expect(validateFile(buf, 'big.pdf', 10)).rejects.toBeInstanceOf(FileValidationError);

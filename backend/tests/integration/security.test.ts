@@ -29,6 +29,8 @@ vi.mock('@services/vectorStore', () => ({
   listDocuments: vi.fn().mockResolvedValue([]),
   getDocument: vi.fn().mockResolvedValue(null),
   deleteDocument: vi.fn().mockResolvedValue(undefined),
+  insertAuditLog: vi.fn().mockResolvedValue(undefined),
+  findDocumentByHash: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock('@queues/documentQueue', () => ({

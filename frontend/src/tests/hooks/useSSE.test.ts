@@ -8,7 +8,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { useSSE, type SSEOptions } from '../../hooks/useSSE';
+import { useSSE, safeParseCitations, type SSEOptions } from '../../hooks/useSSE';
 
 // ---------------------------------------------------------------------------
 // EventSource mock
@@ -55,9 +55,9 @@ class MockEventSource {
 
 beforeEach(() => {
   MockEventSource.instances = [];
-  vi
-    .spyOn(globalThis, 'EventSource' as never)
-    .mockImplementation((...args: unknown[]) => new MockEventSource(args[0] as string) as unknown as EventSource);
+  vi.spyOn(globalThis, 'EventSource' as never).mockImplementation(
+    (...args: unknown[]) => new MockEventSource(args[0] as string) as unknown as EventSource,
+  );
 });
 
 afterEach(() => {
@@ -69,7 +69,9 @@ afterEach(() => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const noop = (): void => { /* noop */ };
+const noop = (): void => {
+  /* noop */
+};
 
 function defaultOptions(overrides: Partial<SSEOptions> = {}): SSEOptions {
   return {
@@ -108,9 +110,7 @@ describe('useSSE — connection lifecycle', () => {
   });
 
   it('closes EventSource on unmount and isConnected becomes false', async () => {
-    const { result, unmount } = renderHook(() =>
-      useSSE('/api/query/xyz/stream', defaultOptions()),
-    );
+    const { result, unmount } = renderHook(() => useSSE('/api/query/xyz/stream', defaultOptions()));
 
     await act(async () => {
       MockEventSource.instances[0]!.triggerOpen();
@@ -160,9 +160,9 @@ describe('useSSE — event parsing', () => {
     const es = MockEventSource.instances[0]!;
     await act(async () => {
       es.emit('searching', { phase: 'searching' });
-      es.emit('found',     { count: 3 });
+      es.emit('found', { count: 3 });
       es.emit('generating', {});
-      es.emit('token',     { text: 'Hello' });
+      es.emit('token', { text: 'Hello' });
     });
 
     expect(onEvent).toHaveBeenCalledTimes(4);
@@ -206,9 +206,7 @@ describe('useSSE — event parsing', () => {
   it('closes the connection and treats a server error event as terminal (no reconnect after)', async () => {
     vi.useFakeTimers();
     const onEvent = vi.fn();
-    const { result } = renderHook(() =>
-      useSSE('/api/query/stream', defaultOptions({ onEvent })),
-    );
+    const { result } = renderHook(() => useSSE('/api/query/stream', defaultOptions({ onEvent })));
 
     const es = MockEventSource.instances[0]!;
     await act(async () => {
@@ -237,13 +235,77 @@ describe('useSSE — event parsing', () => {
     const es = MockEventSource.instances[0]!;
     await act(async () => {
       // Simulate a raw event with invalid JSON
-      const handler = (es as unknown as { listeners: Record<string, Array<(e: MessageEvent) => void>> })
-        .listeners['token']?.[0];
+      const handler = (
+        es as unknown as { listeners: Record<string, Array<(e: MessageEvent) => void>> }
+      ).listeners['token']?.[0];
       handler?.({ data: '{invalid json' } as MessageEvent);
     });
 
     // Should call onEvent with empty data object rather than throwing
     expect(onEvent).toHaveBeenCalledWith({ type: 'token', data: {} });
+  });
+
+  it('falls back to an empty data object when the top-level payload does not match the event schema', async () => {
+    const onEvent = vi.fn();
+    renderHook(() => useSSE('/api/query/stream', defaultOptions({ onEvent })));
+
+    const es = MockEventSource.instances[0]!;
+    await act(async () => {
+      // A raw array is valid JSON but not an object matching any event schema.
+      const handler = (
+        es as unknown as { listeners: Record<string, Array<(e: MessageEvent) => void>> }
+      ).listeners['token']?.[0];
+      handler?.({ data: JSON.stringify(['not', 'an', 'object']) } as MessageEvent);
+    });
+
+    expect(onEvent).toHaveBeenCalledWith({ type: 'token', data: {} });
+  });
+
+  it('passes through a well-formed found event with a chunks array unchanged', async () => {
+    const onEvent = vi.fn();
+    renderHook(() => useSSE('/api/query/stream', defaultOptions({ onEvent })));
+
+    const chunk = {
+      documentId: 'doc-1',
+      filename: 'report.pdf',
+      chunkId: 'chunk-1',
+      similarity: 0.9,
+      excerpt: 'Some excerpt text.',
+    };
+    await act(async () => {
+      MockEventSource.instances[0]!.emit('found', { chunks: [chunk] });
+    });
+
+    expect(onEvent).toHaveBeenCalledWith({ type: 'found', data: { chunks: [chunk] } });
+  });
+});
+
+describe('safeParseCitations', () => {
+  const validCitation = {
+    documentId: 'doc-1',
+    filename: 'report.pdf',
+    chunkId: 'chunk-1',
+    similarity: 0.9,
+    excerpt: 'Some excerpt text.',
+  };
+
+  it('returns an empty array for non-array input', () => {
+    expect(safeParseCitations(undefined)).toEqual([]);
+    expect(safeParseCitations(null)).toEqual([]);
+    expect(safeParseCitations('not an array')).toEqual([]);
+  });
+
+  it('returns valid citations unchanged', () => {
+    expect(safeParseCitations([validCitation])).toEqual([validCitation]);
+  });
+
+  it('drops individual malformed entries while keeping valid ones', () => {
+    const malformed = { documentId: 'doc-2' }; // missing required fields
+    expect(safeParseCitations([validCitation, malformed])).toEqual([validCitation]);
+  });
+
+  it('returns an empty array when every entry is malformed', () => {
+    expect(safeParseCitations([{ foo: 'bar' }, 42, null])).toEqual([]);
   });
 });
 
@@ -269,9 +331,7 @@ describe('useSSE — reconnect logic', () => {
   it('calls onError after exhausting all retries', async () => {
     vi.useFakeTimers();
     const onError = vi.fn();
-    renderHook(() =>
-      useSSE('/api/query/stream', defaultOptions({ onError, maxRetries: 2 })),
-    );
+    renderHook(() => useSSE('/api/query/stream', defaultOptions({ onError, maxRetries: 2 })));
 
     // Trigger error on each attempt
     for (let i = 0; i < 3; i++) {
@@ -287,6 +347,66 @@ describe('useSSE — reconnect logic', () => {
     expect(onError).toHaveBeenCalledWith(
       expect.objectContaining({ message: expect.stringContaining('failed') }),
     );
+    vi.useRealTimers();
+  });
+
+  it('grows the retry delay exponentially rather than retrying at a constant interval', async () => {
+    vi.useFakeTimers();
+    renderHook(() => useSSE('/api/query/stream', defaultOptions({ maxRetries: 3 })));
+
+    // Attempt 1: delay is 1000 * 2**0 = 1000ms. Advancing only 900ms must NOT
+    // yet trigger a reconnect — this is what a regression to a constant
+    // (e.g. always-1000ms) backoff would still pass, so it alone isn't proof
+    // of exponential growth, but it's the baseline the next attempt is
+    // checked against.
+    await act(async () => {
+      MockEventSource.instances[0]!.triggerError();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(900);
+    });
+    expect(MockEventSource.instances.length).toBe(1);
+    await act(async () => {
+      vi.advanceTimersByTime(200);
+    }); // crosses the 1000ms mark
+    expect(MockEventSource.instances.length).toBe(2);
+
+    // Attempt 2: delay is 1000 * 2**1 = 2000ms. Under constant backoff this
+    // would already have fired by 1000ms; asserting it hasn't distinguishes
+    // exponential growth from a flat retry interval.
+    await act(async () => {
+      MockEventSource.instances[1]!.triggerError();
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(MockEventSource.instances.length).toBe(2);
+    await act(async () => {
+      vi.advanceTimersByTime(1100);
+    }); // crosses the 2000ms mark
+    expect(MockEventSource.instances.length).toBe(3);
+
+    vi.useRealTimers();
+  });
+
+  it('stops reconnecting once maxRetries is reached, capping instances at maxRetries + 1', async () => {
+    vi.useFakeTimers();
+    renderHook(() => useSSE('/api/query/stream', defaultOptions({ maxRetries: 2 })));
+
+    // Drive well past the point where a 4th connection could appear if the
+    // cap were off by one (or missing entirely).
+    for (let i = 0; i < 5; i++) {
+      const es = MockEventSource.instances[MockEventSource.instances.length - 1]!;
+      await act(async () => {
+        es.triggerError();
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(15_000);
+      });
+    }
+
+    // Initial connection + exactly maxRetries reconnects, never more.
+    expect(MockEventSource.instances.length).toBe(3);
     vi.useRealTimers();
   });
 });
@@ -310,9 +430,7 @@ describe('useSSE — cleanup', () => {
 
   it('does not fire callbacks after unmount', async () => {
     const onEvent = vi.fn();
-    const { unmount } = renderHook(() =>
-      useSSE('/api/query/stream', defaultOptions({ onEvent })),
-    );
+    const { unmount } = renderHook(() => useSSE('/api/query/stream', defaultOptions({ onEvent })));
 
     unmount();
 

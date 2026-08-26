@@ -15,7 +15,16 @@
 import React from 'react';
 import { Link, useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '@clerk/clerk-react';
-import { BookOpen, Columns2, HelpCircle, Copy, Download, ChevronDown, ArrowRight, ShieldCheck } from 'lucide-react';
+import {
+  BookOpen,
+  Columns2,
+  HelpCircle,
+  Copy,
+  Download,
+  ChevronDown,
+  ArrowRight,
+  ShieldCheck,
+} from 'lucide-react';
 
 // ---------------------------------------------------------------------------
 // Local design-token aliases (values mirror design-system/tokens.ts exactly —
@@ -59,7 +68,7 @@ function LandingNav(): React.JSX.Element {
     >
       <Link
         to="/"
-        aria-label="RAG KB"
+        aria-label="Lumina"
         className="flex items-center gap-2 focus-visible:outline-none"
         style={{ textDecoration: 'none' }}
       >
@@ -68,7 +77,7 @@ function LandingNav(): React.JSX.Element {
           className="font-display font-black"
           style={{ fontSize: '20px', color: C.paperBase, fontVariationSettings: "'opsz' 10" }}
         >
-          RAG KB
+          Lumina
         </span>
       </Link>
 
@@ -76,6 +85,7 @@ function LandingNav(): React.JSX.Element {
         type="button"
         data-testid="nav-open-app"
         onClick={() => navigate(target)}
+        aria-label={isSignedIn ? 'Open the application' : 'Sign in to the application'}
         style={{
           background: C.stampRed,
           color: C.white,
@@ -123,7 +133,10 @@ function HeroChatMock(): React.JSX.Element {
           borderBottom: `1px solid ${C.paperBorder}`,
         }}
       >
-        <span className="font-display" style={{ fontWeight: 700, fontSize: '13px', color: C.inkBase }}>
+        <span
+          className="font-display"
+          style={{ fontWeight: 700, fontSize: '13px', color: C.inkBase }}
+        >
           Reading Room
         </span>
         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
@@ -141,7 +154,9 @@ function HeroChatMock(): React.JSX.Element {
           >
             <Columns2 size={10} /> Split
           </span>
-          <span style={{ border: `1px solid ${C.paperBorder}`, padding: '3px 6px', display: 'flex' }}>
+          <span
+            style={{ border: `1px solid ${C.paperBorder}`, padding: '3px 6px', display: 'flex' }}
+          >
             <HelpCircle size={10} color={C.inkMuted} />
           </span>
         </div>
@@ -227,7 +242,14 @@ function HeroChatMock(): React.JSX.Element {
         </div>
 
         {/* Index cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '10px' }}>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '8px',
+            marginBottom: '10px',
+          }}
+        >
           {[
             { pct: '94%', src: 'q3.pdf', ref: '§3', quote: '"Revenue volatility increased..."' },
             { pct: '81%', src: 'risk.docx', ref: '§1', quote: '"Currency exposure widened..."' },
@@ -256,10 +278,24 @@ function HeroChatMock(): React.JSX.Element {
               >
                 {card.pct}
               </span>
-              <p style={{ fontFamily: FONT_MONO, fontSize: '8px', color: C.inkMuted, marginBottom: '3px' }}>
+              <p
+                style={{
+                  fontFamily: FONT_MONO,
+                  fontSize: '8px',
+                  color: C.inkMuted,
+                  marginBottom: '3px',
+                }}
+              >
                 {card.src} · {card.ref}
               </p>
-              <p style={{ fontFamily: FONT_MONO, fontSize: '9px', color: C.inkSecondary, lineHeight: 1.35 }}>
+              <p
+                style={{
+                  fontFamily: FONT_MONO,
+                  fontSize: '9px',
+                  color: C.inkSecondary,
+                  lineHeight: 1.35,
+                }}
+              >
                 {card.quote}
               </p>
             </div>
@@ -291,13 +327,40 @@ function HeroChatMock(): React.JSX.Element {
             paddingTop: '10px',
           }}
         >
-          <span style={{ display: 'flex', alignItems: 'center', gap: '3px', fontFamily: FONT_MONO, fontSize: '9px', color: C.inkSecondary }}>
+          <span
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+              fontFamily: FONT_MONO,
+              fontSize: '9px',
+              color: C.inkSecondary,
+            }}
+          >
             <Copy size={10} /> Copy
           </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '3px', fontFamily: FONT_MONO, fontSize: '9px', color: C.inkSecondary }}>
+          <span
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+              fontFamily: FONT_MONO,
+              fontSize: '9px',
+              color: C.inkSecondary,
+            }}
+          >
             <Download size={10} /> Export
           </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '3px', fontFamily: FONT_MONO, fontSize: '9px', color: C.inkSecondary }}>
+          <span
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+              fontFamily: FONT_MONO,
+              fontSize: '9px',
+              color: C.inkSecondary,
+            }}
+          >
             TRY WITH ONLY: <ChevronDown size={9} />
           </span>
         </div>
@@ -374,12 +437,15 @@ function HeroSection(): React.JSX.Element {
             marginBottom: '32px',
           }}
         >
-          Upload any document. Ask questions in plain language. Every answer
-          arrives with cited source passages, confidence scores, and a full
-          retrieval breakdown — so you always know where the answer came from.
+          Upload any document. Ask questions in plain language. Every answer arrives with cited
+          source passages, confidence scores, and a full retrieval breakdown — so you always know
+          where the answer came from.
         </p>
 
-        <div className="flex flex-col sm:flex-row gap-3 flex-wrap mb-5" style={{ position: 'relative', zIndex: 1 }}>
+        <div
+          className="flex flex-col sm:flex-row gap-3 flex-wrap mb-5"
+          style={{ position: 'relative', zIndex: 1 }}
+        >
           <button
             type="button"
             data-testid="hero-cta-primary"
@@ -403,7 +469,8 @@ function HeroSection(): React.JSX.Element {
             }}
             onMouseEnter={(e) => {
               (e.currentTarget as HTMLButtonElement).style.transform = 'translateY(-2px)';
-              (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 6px 16px rgba(255,77,46,0.45)';
+              (e.currentTarget as HTMLButtonElement).style.boxShadow =
+                '0 6px 16px rgba(255,77,46,0.45)';
             }}
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLButtonElement).style.transform = '';
@@ -414,12 +481,26 @@ function HeroSection(): React.JSX.Element {
           </button>
         </div>
 
-        <p style={{ fontFamily: FONT_MONO, fontSize: '11px', color: C.inkHint, position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+        <p
+          style={{
+            fontFamily: FONT_MONO,
+            fontSize: '11px',
+            color: C.inkHint,
+            position: 'relative',
+            zIndex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            flexWrap: 'wrap',
+          }}
+        >
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
             <ShieldCheck size={12} aria-hidden="true" style={{ color: C.archiveGreen }} />
             Private to your account
           </span>
-          <span aria-hidden="true" style={{ color: C.inkBorder }}>·</span>
+          <span aria-hidden="true" style={{ color: C.inkBorder }}>
+            ·
+          </span>
           PDF · DOCX · TXT · MD — 10 MB max · 100% free
         </p>
       </div>
@@ -480,7 +561,10 @@ const TICKER_ITEMS = [
 function TickerBar(): React.JSX.Element {
   const doubled = [...TICKER_ITEMS, ...TICKER_ITEMS];
   return (
-    <div style={{ background: C.stampRed, padding: '14px 0', overflow: 'hidden', flexShrink: 0 }} aria-label="Feature highlights">
+    <div
+      style={{ background: C.stampRed, padding: '14px 0', overflow: 'hidden', flexShrink: 0 }}
+      aria-label="Feature highlights"
+    >
       <div
         className="flex w-max motion-safe:animate-ticker-scroll hover:[animation-play-state:paused]"
         style={{ gap: '20px', paddingLeft: '20px' }}
@@ -491,10 +575,16 @@ function TickerBar(): React.JSX.Element {
             aria-hidden={i >= TICKER_ITEMS.length}
             style={{ display: 'flex', alignItems: 'center', gap: '20px', whiteSpace: 'nowrap' }}
           >
-            <span style={{ fontFamily: FONT_MONO, fontSize: '11px', color: C.white, fontWeight: 700 }}>
+            <span
+              style={{ fontFamily: FONT_MONO, fontSize: '11px', color: C.white, fontWeight: 700 }}
+            >
               ▶ {item}
             </span>
-            <span style={{ color: 'rgba(255,255,255,0.4)', fontFamily: FONT_MONO, fontSize: '11px' }}>/</span>
+            <span
+              style={{ color: 'rgba(255,255,255,0.4)', fontFamily: FONT_MONO, fontSize: '11px' }}
+            >
+              /
+            </span>
           </span>
         ))}
       </div>
@@ -525,8 +615,8 @@ const DIFFERENCE_ROWS: DifferenceRowData[] = [
     bodyColor: C.paperBase,
     rightBody: (
       <>
-        Every answer shows the exact passage it drew from — document name,
-        chunk number, similarity score. Hover{' '}
+        Every answer shows the exact passage it drew from — document name, chunk number, similarity
+        score. Hover{' '}
         <span
           aria-label="citation marker"
           style={{
@@ -568,11 +658,18 @@ const DIFFERENCE_ROWS: DifferenceRowData[] = [
     bodyColor: C.inkBase,
     rightBody: (
       <>
-        A confidence score on every answer (HIGH · MEDIUM · LOW). A bar chart
-        of all retrieved chunk scores. A document relationship map. You see
-        everything.
+        A confidence score on every answer (HIGH · MEDIUM · LOW). A bar chart of all retrieved chunk
+        scores. A document relationship map. You see everything.
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '16px' }}>
-          <span style={{ fontFamily: FONT_MONO, fontSize: '10px', color: C.archiveGreen, letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
+          <span
+            style={{
+              fontFamily: FONT_MONO,
+              fontSize: '10px',
+              color: C.archiveGreen,
+              letterSpacing: '0.06em',
+              whiteSpace: 'nowrap',
+            }}
+          >
             HIGH CONFIDENCE
           </span>
           <div style={{ flex: 1, height: '4px', background: C.paperBorder }}>
@@ -629,7 +726,13 @@ function DifferenceSection(): React.JSX.Element {
               <div
                 aria-hidden="true"
                 className="hidden md:block absolute"
-                style={{ top: '-1px', left: '-1px', right: '-1px', height: '3px', background: C.inkHint }}
+                style={{
+                  top: '-1px',
+                  left: '-1px',
+                  right: '-1px',
+                  height: '3px',
+                  background: C.inkHint,
+                }}
               />
               <p
                 style={{
@@ -644,14 +747,20 @@ function DifferenceSection(): React.JSX.Element {
                   textTransform: 'uppercase',
                 }}
               >
-                <span aria-hidden="true" style={{ color: C.inkHint }}>✕</span> THE OLD WAY
+                <span aria-hidden="true" style={{ color: C.inkHint }}>
+                  ✕
+                </span>{' '}
+                THE OLD WAY
               </p>
-              <p className="text-[15px] md:text-[17px]" style={{ fontFamily: FONT_BODY, color: C.inkBase, lineHeight: 1.6 }}>
+              <p
+                className="text-[15px] md:text-[17px]"
+                style={{ fontFamily: FONT_BODY, color: C.inkBase, lineHeight: 1.6 }}
+              >
                 {row.oldBody}
               </p>
             </div>
 
-            {/* Right — RAG KB */}
+            {/* Right — Lumina */}
             <div
               className="relative p-5 md:p-8 border-l-[3px] md:border-l-0"
               style={{ background: row.rightBg, borderColor: C.stampRed }}
@@ -659,7 +768,13 @@ function DifferenceSection(): React.JSX.Element {
               <div
                 aria-hidden="true"
                 className="hidden md:block absolute"
-                style={{ top: '-1px', left: '-1px', right: '-1px', height: '3px', background: C.stampRed }}
+                style={{
+                  top: '-1px',
+                  left: '-1px',
+                  right: '-1px',
+                  height: '3px',
+                  background: C.stampRed,
+                }}
               />
               <p
                 style={{
@@ -671,9 +786,12 @@ function DifferenceSection(): React.JSX.Element {
                   textTransform: 'uppercase',
                 }}
               >
-                RAG KB
+                LUMINA
               </p>
-              <div className="text-[15px] md:text-[17px]" style={{ fontFamily: FONT_BODY, color: row.bodyColor, lineHeight: 1.6 }}>
+              <div
+                className="text-[15px] md:text-[17px]"
+                style={{ fontFamily: FONT_BODY, color: row.bodyColor, lineHeight: 1.6 }}
+              >
                 {row.rightBody}
               </div>
             </div>
@@ -681,14 +799,24 @@ function DifferenceSection(): React.JSX.Element {
         ))}
       </div>
 
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between flex-wrap gap-3" style={{ marginTop: '32px' }}>
+      <div
+        className="flex flex-col sm:flex-row sm:items-center sm:justify-between flex-wrap gap-3"
+        style={{ marginTop: '32px' }}
+      >
         <span style={{ fontFamily: FONT_MONO, fontSize: '11px', color: C.inkMuted }}>
-          Plus: export answers as Markdown · split-screen source view · document relationship map · query history
+          Plus: export answers as Markdown · split-screen source view · document relationship map ·
+          query history
         </span>
         <a
           href="#how-it-works"
           className="hidden min-[481px]:inline-block"
-          style={{ fontFamily: FONT_MONO, fontSize: '11px', color: C.stampRed, textDecoration: 'none', whiteSpace: 'nowrap' }}
+          style={{
+            fontFamily: FONT_MONO,
+            fontSize: '11px',
+            color: C.stampRed,
+            textDecoration: 'none',
+            whiteSpace: 'nowrap',
+          }}
         >
           See all features →
         </a>
@@ -709,7 +837,15 @@ function ThreeStepSection(): React.JSX.Element {
       style={{ background: C.paperBase, flexShrink: 0 }}
       aria-labelledby="how-heading"
     >
-      <div style={{ padding: '56px 40px 0', display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '40px' }}>
+      <div
+        style={{
+          padding: '56px 40px 0',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '16px',
+          marginBottom: '40px',
+        }}
+      >
         <span
           style={{
             fontFamily: FONT_MONO,
@@ -729,7 +865,13 @@ function ThreeStepSection(): React.JSX.Element {
         <h2
           id="how-heading"
           className="font-display"
-          style={{ fontSize: '44px', fontWeight: 900, color: C.inkBase, marginBottom: '40px', lineHeight: 1.1 }}
+          style={{
+            fontSize: '44px',
+            fontWeight: 900,
+            color: C.inkBase,
+            marginBottom: '40px',
+            lineHeight: 1.1,
+          }}
         >
           From filing
           <br />
@@ -737,9 +879,19 @@ function ThreeStepSection(): React.JSX.Element {
         </h2>
       </div>
 
-      <div style={{ display: 'grid', border: `1px solid ${C.paperBorder}`, margin: '0' }} className="grid-cols-1 md:grid-cols-3">
+      <div
+        style={{ display: 'grid', border: `1px solid ${C.paperBorder}`, margin: '0' }}
+        className="grid-cols-1 md:grid-cols-3"
+      >
         {/* Panel 1 — FILE IT */}
-        <div style={{ background: C.white, borderRight: `1px solid ${C.paperBorder}`, padding: '32px', position: 'relative' }}>
+        <div
+          style={{
+            background: C.white,
+            borderRight: `1px solid ${C.paperBorder}`,
+            padding: '32px',
+            position: 'relative',
+          }}
+        >
           <span
             aria-hidden="true"
             style={{
@@ -770,14 +922,30 @@ function ThreeStepSection(): React.JSX.Element {
           >
             FILE IT
           </span>
-          <h3 className="font-display" style={{ fontSize: '28px', fontWeight: 900, fontStyle: 'italic', color: C.inkBase, marginBottom: '12px' }}>
+          <h3
+            className="font-display"
+            style={{
+              fontSize: '28px',
+              fontWeight: 900,
+              fontStyle: 'italic',
+              color: C.inkBase,
+              marginBottom: '12px',
+            }}
+          >
             Drop it in.
           </h3>
-          <p style={{ fontFamily: FONT_BODY, fontSize: '14px', color: C.inkSecondary, lineHeight: 1.7, marginBottom: '16px' }}>
-            Drag PDFs, Word docs, Markdown, or plain text into the upload zone.
-            Each file is validated (magic bytes, not just extension), chunked
-            into 512-token segments with 50-token overlap, and embedded via
-            HuggingFace — automatically, with no configuration.
+          <p
+            style={{
+              fontFamily: FONT_BODY,
+              fontSize: '14px',
+              color: C.inkSecondary,
+              lineHeight: 1.7,
+              marginBottom: '16px',
+            }}
+          >
+            Drag PDFs, Word docs, Markdown, or plain text into the upload zone. Each file is
+            validated (magic bytes, not just extension), chunked into 512-token segments with
+            50-token overlap, and embedded via HuggingFace — automatically, with no configuration.
           </p>
           <p
             style={{
@@ -793,7 +961,14 @@ function ThreeStepSection(): React.JSX.Element {
         </div>
 
         {/* Panel 2 — ASK IT */}
-        <div style={{ background: C.archiveGreen, borderRight: '1px solid rgba(255,255,255,0.1)', padding: '32px', position: 'relative' }}>
+        <div
+          style={{
+            background: C.archiveGreen,
+            borderRight: '1px solid rgba(255,255,255,0.1)',
+            padding: '32px',
+            position: 'relative',
+          }}
+        >
           <span
             aria-hidden="true"
             style={{
@@ -825,13 +1000,30 @@ function ThreeStepSection(): React.JSX.Element {
           >
             ASK IT
           </span>
-          <h3 className="font-display" style={{ fontSize: '28px', fontWeight: 900, fontStyle: 'italic', color: C.white, marginBottom: '12px' }}>
+          <h3
+            className="font-display"
+            style={{
+              fontSize: '28px',
+              fontWeight: 900,
+              fontStyle: 'italic',
+              color: C.white,
+              marginBottom: '12px',
+            }}
+          >
             Just ask.
           </h3>
-          <p style={{ fontFamily: FONT_BODY, fontSize: '14px', color: 'rgba(255,255,255,0.7)', lineHeight: 1.7, marginBottom: '16px' }}>
-            Type your question in plain language. The query is embedded and
-            compared against all indexed chunks by cosine similarity. You can
-            query all documents at once or filter to specific sources.
+          <p
+            style={{
+              fontFamily: FONT_BODY,
+              fontSize: '14px',
+              color: 'rgba(255,255,255,0.7)',
+              lineHeight: 1.7,
+              marginBottom: '16px',
+            }}
+          >
+            Type your question in plain language. The query is embedded and compared against all
+            indexed chunks by cosine similarity. You can query all documents at once or filter to
+            specific sources.
           </p>
           <p
             style={{
@@ -878,13 +1070,30 @@ function ThreeStepSection(): React.JSX.Element {
           >
             CITE IT
           </span>
-          <h3 className="font-display" style={{ fontSize: '28px', fontWeight: 900, fontStyle: 'italic', color: C.paperBase, marginBottom: '12px' }}>
+          <h3
+            className="font-display"
+            style={{
+              fontSize: '28px',
+              fontWeight: 900,
+              fontStyle: 'italic',
+              color: C.paperBase,
+              marginBottom: '12px',
+            }}
+          >
             Trace it back.
           </h3>
-          <p style={{ fontFamily: FONT_BODY, fontSize: '14px', color: C.inkMuted, lineHeight: 1.7, marginBottom: '16px' }}>
-            Every answer includes the exact passages it drew from — chunk
-            reference, similarity score, full source text. Hover a citation to
-            highlight its card. Click to scroll to it. Nothing goes unverified.
+          <p
+            style={{
+              fontFamily: FONT_BODY,
+              fontSize: '14px',
+              color: C.inkMuted,
+              lineHeight: 1.7,
+              marginBottom: '16px',
+            }}
+          >
+            Every answer includes the exact passages it drew from — chunk reference, similarity
+            score, full source text. Hover a citation to highlight its card. Click to scroll to it.
+            Nothing goes unverified.
           </p>
           <p
             style={{
@@ -930,21 +1139,60 @@ function ShowcaseMock(): React.JSX.Element {
     >
       {/* Left — answer column (60%) */}
       <div style={{ flex: '1 1 60%', padding: '18px', borderRight: `1px solid ${C.paperBorder}` }}>
-        <p style={{ fontFamily: FONT_MONO, fontSize: '9px', color: C.inkMuted, marginBottom: '10px', textTransform: 'uppercase' }}>
+        <p
+          style={{
+            fontFamily: FONT_MONO,
+            fontSize: '9px',
+            color: C.inkMuted,
+            marginBottom: '10px',
+            textTransform: 'uppercase',
+          }}
+        >
           ANSWER
         </p>
         <p style={{ fontFamily: FONT_BODY, fontSize: '13px', color: C.inkBase, lineHeight: 1.7 }}>
           Market volatility remains the primary concern{' '}
-          <sup style={{ background: C.archiveGreen, color: C.white, fontFamily: FONT_MONO, fontSize: '8px', borderRadius: '50%', padding: '1px 4px' }}>1</sup>{' '}
+          <sup
+            style={{
+              background: C.archiveGreen,
+              color: C.white,
+              fontFamily: FONT_MONO,
+              fontSize: '8px',
+              borderRadius: '50%',
+              padding: '1px 4px',
+            }}
+          >
+            1
+          </sup>{' '}
           with additional exposure from currency fluctuations{' '}
-          <sup style={{ background: C.archiveGreen, color: C.white, fontFamily: FONT_MONO, fontSize: '8px', borderRadius: '50%', padding: '1px 4px' }}>2</sup>{' '}
+          <sup
+            style={{
+              background: C.archiveGreen,
+              color: C.white,
+              fontFamily: FONT_MONO,
+              fontSize: '8px',
+              borderRadius: '50%',
+              padding: '1px 4px',
+            }}
+          >
+            2
+          </sup>{' '}
           noted in the Q3 filing.
         </p>
       </div>
 
       {/* Right — source panel (40%) */}
       <div style={{ flex: '1 1 40%', padding: '18px', background: C.paperMuted }}>
-        <p style={{ fontFamily: FONT_MONO, fontSize: '9px', color: C.inkSecondary, marginBottom: '10px', fontWeight: 700, letterSpacing: '0.05em' }}>
+        <p
+          style={{
+            fontFamily: FONT_MONO,
+            fontSize: '9px',
+            color: C.inkSecondary,
+            marginBottom: '10px',
+            fontWeight: 700,
+            letterSpacing: '0.05em',
+          }}
+        >
           SOURCE DOCUMENTS [2]
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '10px' }}>
@@ -952,7 +1200,15 @@ function ShowcaseMock(): React.JSX.Element {
             { pct: '94%', src: 'q3.pdf · Chunk 3' },
             { pct: '81%', src: 'risk.docx · Chunk 1' },
           ].map((card) => (
-            <div key={card.src} style={{ background: C.white, border: `1px solid ${C.paperBorder}`, padding: '8px 10px', position: 'relative' }}>
+            <div
+              key={card.src}
+              style={{
+                background: C.white,
+                border: `1px solid ${C.paperBorder}`,
+                padding: '8px 10px',
+                position: 'relative',
+              }}
+            >
               <span
                 style={{
                   position: 'absolute',
@@ -968,7 +1224,9 @@ function ShowcaseMock(): React.JSX.Element {
               >
                 {card.pct}
               </span>
-              <p style={{ fontFamily: FONT_MONO, fontSize: '9px', color: C.inkMuted }}>{card.src}</p>
+              <p style={{ fontFamily: FONT_MONO, fontSize: '9px', color: C.inkMuted }}>
+                {card.src}
+              </p>
             </div>
           ))}
         </div>
@@ -983,7 +1241,14 @@ function ShowcaseMock(): React.JSX.Element {
               <div style={{ flex: 1, height: '6px', background: C.paperBorder }}>
                 <div style={{ width: `${bar.pct}%`, height: '100%', background: C.archiveGreen }} />
               </div>
-              <span style={{ fontFamily: FONT_MONO, fontSize: '8px', color: C.inkMuted, whiteSpace: 'nowrap' }}>
+              <span
+                style={{
+                  fontFamily: FONT_MONO,
+                  fontSize: '8px',
+                  color: C.inkMuted,
+                  whiteSpace: 'nowrap',
+                }}
+              >
                 {bar.pct}%
               </span>
             </div>
@@ -996,8 +1261,14 @@ function ShowcaseMock(): React.JSX.Element {
 
 function ShowcaseSection(): React.JSX.Element {
   return (
-    <section style={{ background: C.paperDeep, padding: '56px 40px', flexShrink: 0 }} aria-labelledby="showcase-heading">
-      <div style={{ display: 'flex', gap: '48px' }} className="flex-col md:flex-row md:items-center">
+    <section
+      style={{ background: C.paperDeep, padding: '56px 40px', flexShrink: 0 }}
+      aria-labelledby="showcase-heading"
+    >
+      <div
+        style={{ display: 'flex', gap: '48px' }}
+        className="flex-col md:flex-row md:items-center"
+      >
         <div style={{ flex: 1 }}>
           <p
             style={{
@@ -1014,20 +1285,39 @@ function ShowcaseSection(): React.JSX.Element {
           <h2
             id="showcase-heading"
             className="font-display"
-            style={{ fontSize: '36px', fontWeight: 900, fontStyle: 'italic', color: C.inkBase, marginBottom: '20px', lineHeight: 1.15 }}
+            style={{
+              fontSize: '36px',
+              fontWeight: 900,
+              fontStyle: 'italic',
+              color: C.inkBase,
+              marginBottom: '20px',
+              lineHeight: 1.15,
+            }}
           >
             Read the answer and its sources side by side.
           </h2>
-          <p style={{ fontFamily: FONT_BODY, fontSize: '16px', color: C.inkSecondary, lineHeight: 1.7, marginBottom: '24px' }}>
-            Enable split-screen to see retrieved source chunks update live in
-            the right panel as your answer streams in the left. The source
-            panel shows the full confidence bar, all retrieved cards at full
-            width, and the relevance score chart — expanded by default, no
+          <p
+            style={{
+              fontFamily: FONT_BODY,
+              fontSize: '16px',
+              color: C.inkSecondary,
+              lineHeight: 1.7,
+              marginBottom: '24px',
+            }}
+          >
+            Enable split-screen to see retrieved source chunks update live in the right panel as
+            your answer streams in the left. The source panel shows the full confidence bar, all
+            retrieved cards at full width, and the relevance score chart — expanded by default, no
             toggle needed.
           </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
+          <div
+            style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}
+          >
             {SHOWCASE_BULLETS.map((line) => (
-              <span key={line} style={{ fontFamily: FONT_MONO, fontSize: '11px', color: C.inkSecondary }}>
+              <span
+                key={line}
+                style={{ fontFamily: FONT_MONO, fontSize: '11px', color: C.inkSecondary }}
+              >
                 {line}
               </span>
             ))}
@@ -1058,7 +1348,10 @@ const STATS = [
 
 function StatsBar(): React.JSX.Element {
   return (
-    <section style={{ background: C.inkBase, padding: '32px 40px', flexShrink: 0 }} aria-label="Project stats">
+    <section
+      style={{ background: C.inkBase, padding: '32px 40px', flexShrink: 0 }}
+      aria-label="Project stats"
+    >
       <div
         className="grid grid-cols-2 md:grid-cols-4 [&>div]:border-t [&>div]:md:border-t-0"
         style={{ borderColor: C.inkBorder }}
@@ -1070,10 +1363,21 @@ function StatsBar(): React.JSX.Element {
             className="md:border-l first:border-l-0 md:first:border-l-0"
             style={{ textAlign: 'center', padding: '16px', borderColor: C.inkBorder }}
           >
-            <p className="font-display" style={{ fontSize: '48px', fontWeight: 900, color: C.stampRed, lineHeight: 1 }}>
+            <p
+              className="font-display"
+              style={{ fontSize: '48px', fontWeight: 900, color: C.stampRed, lineHeight: 1 }}
+            >
               {stat.value}
             </p>
-            <p style={{ fontFamily: FONT_MONO, fontSize: '11px', color: C.inkMuted, letterSpacing: '0.1em', marginTop: '8px' }}>
+            <p
+              style={{
+                fontFamily: FONT_MONO,
+                fontSize: '11px',
+                color: C.inkMuted,
+                letterSpacing: '0.1em',
+                marginTop: '8px',
+              }}
+            >
               {stat.label}
             </p>
           </div>
@@ -1109,18 +1413,52 @@ function FooterCTA(): React.JSX.Element {
             >
               Ready to file your first document?
             </p>
-            <p style={{ fontFamily: FONT_BODY, fontSize: '14px', color: 'rgba(255,255,255,0.7)', maxWidth: '420px' }}>
+            <p
+              style={{
+                fontFamily: FONT_BODY,
+                fontSize: '14px',
+                color: 'rgba(255,255,255,0.7)',
+                maxWidth: '420px',
+              }}
+            >
               Free forever. No credit card. No rate limits that matter for personal use.
             </p>
 
-            <nav aria-label="Footer navigation" style={{ display: 'flex', gap: '16px', marginTop: '16px', flexWrap: 'wrap' }}>
-              <Link to="/upload" style={{ fontFamily: FONT_BODY, fontSize: '13px', color: 'rgba(255,255,255,0.8)', textDecoration: 'underline' }}>
+            <nav
+              aria-label="Footer navigation"
+              style={{ display: 'flex', gap: '16px', marginTop: '16px', flexWrap: 'wrap' }}
+            >
+              <Link
+                to="/upload"
+                style={{
+                  fontFamily: FONT_BODY,
+                  fontSize: '13px',
+                  color: 'rgba(255,255,255,0.8)',
+                  textDecoration: 'underline',
+                }}
+              >
                 Acquisitions Desk
               </Link>
-              <Link to="/chat" style={{ fontFamily: FONT_BODY, fontSize: '13px', color: 'rgba(255,255,255,0.8)', textDecoration: 'underline' }}>
+              <Link
+                to="/chat"
+                style={{
+                  fontFamily: FONT_BODY,
+                  fontSize: '13px',
+                  color: 'rgba(255,255,255,0.8)',
+                  textDecoration: 'underline',
+                }}
+              >
                 Reading Room
               </Link>
-              <Link to="/documents" style={{ fontFamily: FONT_BODY, fontSize: '13px', color: 'rgba(255,255,255,0.8)', textDecoration: 'underline' }}>
+              <Link
+                to="/documents"
+                style={{
+                  fontFamily: FONT_BODY,
+                  fontSize: '13px',
+                  color: 'rgba(255,255,255,0.8)',
+                  textDecoration: 'underline',
+                }}
+              >
                 Archive
               </Link>
             </nav>
@@ -1185,7 +1523,14 @@ export function Landing(): React.JSX.Element {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', background: C.paperBase }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: '100vh',
+        background: C.paperBase,
+      }}
+    >
       <LandingNav />
       <HeroSection />
       <TickerBar />

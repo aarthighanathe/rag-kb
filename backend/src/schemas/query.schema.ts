@@ -67,6 +67,26 @@ export const QueryRequestSchema = z.object({
         'Defaults to 0 — matchCount bounds result size. Raise (e.g. 0.15) ' +
         'if irrelevant chunks appear in answers.',
     ),
+  relativeFloorGap: z
+    .number()
+    .max(1, 'relativeFloorGap must be <= 1')
+    .optional()
+    .describe(
+      'Relative floor gap for the vector search leg: drops candidates that trail ' +
+        "the batch's own top match by more than this gap. Defaults to the SQL " +
+        'function default (0.15). Pass 0 or any negative number to disable the ' +
+        'relative floor entirely so matchCount alone bounds result size.',
+    ),
+  keywordThreshold: z
+    .number()
+    .min(0, 'keywordThreshold must be between 0 and 1')
+    .max(1, 'keywordThreshold must be between 0 and 1')
+    .optional()
+    .describe(
+      'Minimum pg_trgm trigram similarity for the keyword search leg. ' +
+        'Defaults to the SQL function default (0.15). Lower to retrieve more ' +
+        'keyword matches; raise to require stronger term overlap.',
+    ),
   history: z
     .array(ConversationTurnSchema)
     .max(6, 'History must not exceed 6 messages (3 exchanges)')
@@ -75,3 +95,21 @@ export const QueryRequestSchema = z.object({
 });
 
 export type QueryRequest = z.infer<typeof QueryRequestSchema>;
+
+/** Schema for GET /api/query/history query parameters. */
+export const QueryHistoryQuerySchema = z.object({
+  page: z.coerce.number().int().positive('page must be positive').default(1),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1, 'limit must be 1-50')
+    .max(50, 'limit must be 1-50')
+    .default(20),
+  search: z
+    .string()
+    .max(200, 'search must be at most 200 characters')
+    .optional()
+    .describe('Case-insensitive substring match against past query text'),
+});
+
+export type QueryHistoryQuery = z.infer<typeof QueryHistoryQuerySchema>;

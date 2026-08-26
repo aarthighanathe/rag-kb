@@ -15,6 +15,8 @@ import {
   updateDocumentStatus,
   upsertChunks,
   updateChunkCount,
+  setAutoTags,
+  deriveAutoTags,
 } from '../../services/vectorStore.js';
 import { DOCUMENT_QUEUE_NAME } from '../documentQueue.js';
 import { beginAttempt, endAttempt, JobCancelledError } from '../cancellation.js';
@@ -132,7 +134,9 @@ async function processDocumentJob(
       // Deterministic failure — re-processing the same empty/unparseable file
       // will fail identically every time, so BullMQ must not retry it.
       // UnrecoverableError signals BullMQ to skip remaining attempts.
-      throw new UnrecoverableError('Document produced zero chunks — file may be empty or unreadable');
+      throw new UnrecoverableError(
+        'Document produced zero chunks — file may be empty or unreadable',
+      );
     }
     await job.updateProgress(40);
     jobLogger.debug('Text chunked', { chunkCount: chunks.length });
@@ -149,9 +153,22 @@ async function processDocumentJob(
 
     // ── Step 4: Store chunks in Supabase (90%) ────────────────────────────
     await upsertChunks(documentId, chunks, embeddings, signal);
-    await updateChunkCount(documentId, chunks.length, signal);
+
+    // Auto-tag from section headings already computed during chunking — no
+    // extra LLM call, purely reusing data section-aware chunking produced
+    // for free. A document with no detected structure yields no tags, which
+    // is fine (setAutoTags no-ops on an empty array rather than clearing any
+    // tags the user may have already added manually).
+    const autoTags = deriveAutoTags(chunks.map((c) => c.metadata.section));
+    // Independent column updates on the same document row — run concurrently
+    // instead of paying two sequential round trips.
+    await Promise.all([
+      updateChunkCount(documentId, chunks.length, signal),
+      setAutoTags(documentId, autoTags, signal),
+    ]);
+
     await job.updateProgress(90);
-    jobLogger.debug('Chunks stored in vector store');
+    jobLogger.debug('Chunks stored in vector store', { autoTagCount: autoTags.length });
 
     // ── Step 5: Mark ready, clean up (100%) ──────────────────────────────
     await updateDocumentStatus(documentId, 'ready', undefined, signal);
@@ -267,13 +284,15 @@ documentWorker.on('failed', (job, err) => {
   // otherwise stay 'processing' forever.
   if (job && job.attemptsMade >= (job.opts.attempts ?? 1)) {
     const message = err.message || 'Document processing failed after all retry attempts';
-    void updateDocumentStatus(job.data.documentId, 'failed', message).catch((statusErr: unknown) => {
-      logger.error('Failed to write terminal failed status after exhausted retries', {
-        jobId: job.id,
-        documentId: job.data.documentId,
-        error: statusErr instanceof Error ? statusErr.message : String(statusErr),
-      });
-    });
+    void updateDocumentStatus(job.data.documentId, 'failed', message).catch(
+      (statusErr: unknown) => {
+        logger.error('Failed to write terminal failed status after exhausted retries', {
+          jobId: job.id,
+          documentId: job.data.documentId,
+          error: statusErr instanceof Error ? statusErr.message : String(statusErr),
+        });
+      },
+    );
   }
 });
 

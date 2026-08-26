@@ -17,6 +17,15 @@ vi.mock('../../src/utils/logger', () => ({
   logger: { debug: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
+// Always a cache miss/no-op — the cache's own behavior is covered by
+// queryEmbeddingCache.test.ts. Mocked here so these tests never touch a real
+// Redis connection and every embedText call still reaches HuggingFace via
+// mockFetch, preserving the existing fetch-call-count assertions below.
+vi.mock('../../src/services/queryEmbeddingCache', () => ({
+  getCachedQueryEmbedding: vi.fn().mockResolvedValue(null),
+  setCachedQueryEmbedding: vi.fn().mockResolvedValue(undefined),
+}));
+
 import {
   embedText,
   embedBatch,
@@ -25,6 +34,7 @@ import {
   EMBEDDING_MODEL,
 } from '../../src/services/embedder';
 import { EmbeddingError, EmbeddingErrorCode } from '../../src/utils/errors';
+import { getCachedQueryEmbedding, setCachedQueryEmbedding } from '../../src/services/queryEmbeddingCache';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -111,6 +121,27 @@ describe('embedText', () => {
       expect(err).toBeInstanceOf(EmbeddingError);
       expect((err as EmbeddingError).code).toBe(EmbeddingErrorCode.EMPTY_INPUT);
     }
+  });
+
+  it('returns the cached result and skips the HuggingFace call on a cache hit', async () => {
+    const cached = { embedding: makeEmbedding(0.5), tokenCount: 2, model: EMBEDDING_MODEL };
+    vi.mocked(getCachedQueryEmbedding).mockResolvedValueOnce(cached);
+
+    const result = await embedText('a repeated query');
+
+    expect(result).toEqual(cached);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('caches the result after a live HuggingFace call on a cache miss', async () => {
+    mockFetch.mockResolvedValue(mockResponse([makeEmbedding()]));
+
+    const promise = embedText('a new query');
+    await vi.runAllTimersAsync();
+    const result = await promise;
+
+    expect(getCachedQueryEmbedding).toHaveBeenCalledWith('a new query');
+    expect(setCachedQueryEmbedding).toHaveBeenCalledWith('a new query', result);
   });
 });
 
@@ -210,7 +241,7 @@ describe('embedBatch', () => {
     await vi.runAllTimersAsync();
 
     const err = await errPromise;
-    expect(err.code).toBe(EmbeddingErrorCode.API_UNAVAILABLE);
+    expect((err as EmbeddingError).code).toBe(EmbeddingErrorCode.API_UNAVAILABLE);
   });
 
   it('wraps a null response in API_UNAVAILABLE rather than crashing', async () => {
@@ -221,7 +252,7 @@ describe('embedBatch', () => {
 
     const err = await errPromise;
     expect(err).toBeInstanceOf(EmbeddingError);
-    expect(err.code).toBe(EmbeddingErrorCode.API_UNAVAILABLE);
+    expect((err as EmbeddingError).code).toBe(EmbeddingErrorCode.API_UNAVAILABLE);
   });
 });
 
@@ -247,7 +278,7 @@ describe('surfaces transient failures immediately (no per-batch retry)', () => {
     await vi.runAllTimersAsync();
 
     const err = await errPromise;
-    expect(err.code).toBe(EmbeddingErrorCode.RATE_LIMITED);
+    expect((err as EmbeddingError).code).toBe(EmbeddingErrorCode.RATE_LIMITED);
     expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });

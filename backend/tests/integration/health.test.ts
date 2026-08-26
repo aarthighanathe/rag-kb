@@ -40,6 +40,79 @@ describe('GET /health', () => {
   });
 });
 
+describe('GET /health/detailed', () => {
+  it('returns 200 healthy when all dependencies are reachable', async () => {
+    mockCheckReadiness.mockResolvedValue({
+      status: 'ok',
+      checks: {
+        supabase: { status: 'ok' },
+        redis: { status: 'ok' },
+        huggingface: { status: 'ok' },
+        groq: { status: 'ok' },
+      },
+    });
+
+    const res = await supertest(app).get('/health/detailed').expect(200);
+    expect(res.body.status).toBe('healthy');
+    expect(res.body.checks.supabase.status).toBe('ok');
+  });
+
+  it('returns 503 unhealthy when a dependency is down', async () => {
+    mockCheckReadiness.mockResolvedValue({
+      status: 'error',
+      checks: {
+        supabase: { status: 'ok' },
+        redis: { status: 'error', error: 'NOAUTH' },
+        huggingface: { status: 'ok' },
+        groq: { status: 'ok' },
+      },
+    });
+
+    const res = await supertest(app).get('/health/detailed').expect(503);
+    expect(res.body.status).toBe('unhealthy');
+  });
+});
+
+describe('GET /health/ready', () => {
+  it('returns 200 ready when all dependencies are reachable', async () => {
+    mockCheckReadiness.mockResolvedValue({
+      status: 'ok',
+      checks: {
+        supabase: { status: 'ok' },
+        redis: { status: 'ok' },
+        huggingface: { status: 'ok' },
+        groq: { status: 'ok' },
+      },
+    });
+
+    const res = await supertest(app).get('/health/ready').expect(200);
+    expect(res.body.status).toBe('ready');
+  });
+
+  it('returns 503 not_ready when a dependency is down', async () => {
+    mockCheckReadiness.mockResolvedValue({
+      status: 'error',
+      checks: {
+        supabase: { status: 'error', error: 'unreachable' },
+        redis: { status: 'ok' },
+        huggingface: { status: 'ok' },
+        groq: { status: 'ok' },
+      },
+    });
+
+    const res = await supertest(app).get('/health/ready').expect(503);
+    expect(res.body.status).toBe('not_ready');
+  });
+});
+
+describe('GET /health/live', () => {
+  it('returns 200 alive without checking any dependency', async () => {
+    const res = await supertest(app).get('/health/live').expect(200);
+    expect(res.body.status).toBe('alive');
+    expect(mockCheckReadiness).not.toHaveBeenCalled();
+  });
+});
+
 describe('GET /api/health', () => {
   it('returns 200 when all dependencies are reachable', async () => {
     mockCheckReadiness.mockResolvedValue({

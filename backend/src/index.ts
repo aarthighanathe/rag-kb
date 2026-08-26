@@ -78,7 +78,7 @@ async function bootstrap(): Promise<void> {
   const app = createApp();
 
   const server = app.listen(env.PORT, () => {
-    logger.info(`RAG Knowledge Base backend started`, {
+    logger.info(`Lumina backend started`, {
       port: env.PORT,
       env: env.NODE_ENV,
       docs: `http://localhost:${env.PORT}/api/docs`,

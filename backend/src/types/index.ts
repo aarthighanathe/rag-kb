@@ -63,6 +63,7 @@ export type SupportedMimeType =
   | 'application/pdf'
   | 'text/plain'
   | 'text/markdown'
+  | 'text/html'
   | 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 /** Document status lifecycle. */
@@ -79,6 +80,8 @@ export interface DocumentRecord {
   created_at: string;
   updated_at: string;
   error_message?: string;
+  /** Auto-derived (from section headings) and/or user-edited tags. Empty array if none. */
+  tags: string[];
 }
 
 /** Metadata attached to each chunk for citation purposes. */
@@ -97,6 +100,15 @@ export interface RetrievedChunk {
   similarity: number;
   metadata: ChunkMetadata;
   filename: string;
+  /**
+   * Which retrieval method produced this chunk.
+   * 'vector' — cosine similarity (all-MiniLM-L6-v2, scores ~0.04–0.40).
+   * 'keyword' — pg_trgm trigram similarity (scores ~0.15–1.0, different scale).
+   * Used downstream (classifyRelevanceBand in llm.ts, calculateConfidence on the
+   * frontend) to apply origin-appropriate thresholds instead of treating both
+   * scales as the same metric.
+   */
+  source: 'vector' | 'keyword';
 }
 
 /** Source citation included with an LLM answer. */
@@ -139,7 +151,7 @@ export interface JobStatus {
 // ─── File Handling Types ──────────────────────────────────────────────────────
 
 /** Extension-based file type identifier used for buffer extraction and magic-byte validation. */
-export type FileType = 'pdf' | 'docx' | 'txt' | 'md';
+export type FileType = 'pdf' | 'docx' | 'txt' | 'md' | 'html';
 
 /** Result of the complete server-side file validation pipeline. */
 export interface FileValidationResult {
@@ -171,13 +183,20 @@ export interface QueryLog {
   user_id: string;
   /** User-submitted helpfulness rating. NULL until rated (most rows stay unrated). */
   feedback: QueryFeedback | null;
+  /** Post-hoc validation confidence (0-1), written asynchronously after the stream completes. NULL until validated. */
+  validation_confidence: number | null;
+  /** Count of issues (hallucination/contradiction/etc.) flagged by post-hoc validation. NULL until validated. */
+  validation_issue_count: number | null;
 }
 
 /**
  * Payload for inserting a query log entry.
  * All analytics fields are optional — the query text is the only requirement.
  */
-export type InsertQueryLog = Omit<QueryLog, 'id' | 'created_at' | 'feedback'> & {
+export type InsertQueryLog = Omit<
+  QueryLog,
+  'id' | 'created_at' | 'feedback' | 'validation_confidence' | 'validation_issue_count'
+> & {
   retrieved_chunk_ids?: string[] | null;
   response_preview?: string | null;
   latency_ms?: number | null;

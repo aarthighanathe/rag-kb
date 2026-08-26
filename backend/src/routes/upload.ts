@@ -8,14 +8,16 @@
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
+import crypto from 'crypto';
 import { validateFile, MIME_TO_FILE_TYPE } from '../utils/fileValidator.js';
-import { createDocument, deleteDocument } from '../services/vectorStore.js';
+import { createDocument, deleteDocument, findDocumentByHash } from '../services/vectorStore.js';
 import { uploadFile, removeFile } from '../services/storage.js';
 import { addDocumentJob } from '../queues/documentQueue.js';
 import { UploadRequestSchema } from '../schemas/upload.schema.js';
 import { ValidationError, InternalError, type FileType } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { env } from '../config/env.js';
+import { logDocumentUpload } from '../utils/auditLogger.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -57,11 +59,14 @@ async function rollbackFile(storageKey: string, correlationId: string): Promise<
   try {
     await removeFile(storageKey);
   } catch (err) {
-    logger.warn('Failed to roll back staged file after upload failure — manual cleanup may be needed', {
-      storageKey,
-      correlationId,
-      error: err instanceof Error ? err.message : String(err),
-    });
+    logger.warn(
+      'Failed to roll back staged file after upload failure — manual cleanup may be needed',
+      {
+        storageKey,
+        correlationId,
+        error: err instanceof Error ? err.message : String(err),
+      },
+    );
   }
 }
 
@@ -80,11 +85,14 @@ async function rollbackDocumentRow(
   try {
     await deleteDocument(documentId, userId);
   } catch (err) {
-    logger.warn('Failed to roll back document row after upload failure — manual cleanup may be needed', {
-      documentId,
-      correlationId,
-      error: err instanceof Error ? err.message : String(err),
-    });
+    logger.warn(
+      'Failed to roll back document row after upload failure — manual cleanup may be needed',
+      {
+        documentId,
+        correlationId,
+        error: err instanceof Error ? err.message : String(err),
+      },
+    );
   }
 }
 
@@ -105,7 +113,13 @@ async function processUploadedFile(
   file: Express.Multer.File,
   correlationId: string,
   userId: string,
-): Promise<{ id: string; filename: string; status: 'pending'; jobId: string }> {
+): Promise<{
+  id: string;
+  filename: string;
+  status: 'pending';
+  jobId: string;
+  duplicateOf?: { id: string; filename: string; status: string; createdAt: string };
+}> {
   const requestLogger = logger.child({ correlationId });
 
   const validated = await validateFile(file.buffer, file.originalname, env.MAX_FILE_SIZE_MB);
@@ -121,6 +135,19 @@ async function processUploadedFile(
     throw new InternalError(`No FileType mapping for validated MIME type "${validated.mimeType}"`);
   }
 
+  // SHA-256 of the raw bytes, computed once and both persisted (for future
+  // duplicate checks against this file) and used to check against the
+  // uploader's existing documents right now. Informational only — a match
+  // is surfaced in the response, never blocks the upload, since a genuine
+  // re-upload (e.g. after fixing a processing failure) is a valid use case.
+  const contentHash = crypto.createHash('sha256').update(file.buffer).digest('hex');
+  const duplicate = await findDocumentByHash(userId, contentHash).catch((err: unknown) => {
+    requestLogger.warn('Duplicate document lookup failed, proceeding without a duplicate notice', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  });
+
   await uploadFile(storageKey, file.buffer);
 
   try {
@@ -131,6 +158,7 @@ async function processUploadedFile(
       fileType,
       sizeBytes: validated.sizeBytes,
       userId,
+      contentHash,
     });
   } catch (err) {
     await rollbackFile(storageKey, correlationId);
@@ -158,9 +186,24 @@ async function processUploadedFile(
     documentId,
     filename: validated.sanitizedName,
     jobId,
+    duplicateOfDocumentId: duplicate?.id,
   });
+  logDocumentUpload(userId, documentId, validated.sanitizedName, true, correlationId);
 
-  return { id: documentId, filename: validated.sanitizedName, status: 'pending', jobId };
+  return {
+    id: documentId,
+    filename: validated.sanitizedName,
+    status: 'pending',
+    jobId,
+    ...(duplicate && {
+      duplicateOf: {
+        id: duplicate.id,
+        filename: duplicate.filename,
+        status: duplicate.status,
+        createdAt: duplicate.createdAt,
+      },
+    }),
+  };
 }
 
 /**
@@ -207,9 +250,7 @@ router.post(
     const errors = settled
       .map((r, i) => ({ result: r, file: files[i] }))
       .filter(
-        (
-          entry,
-        ): entry is { result: PromiseRejectedResult; file: Express.Multer.File } =>
+        (entry): entry is { result: PromiseRejectedResult; file: Express.Multer.File } =>
           entry.result.status === 'rejected',
       )
       .map(({ result, file }) => ({

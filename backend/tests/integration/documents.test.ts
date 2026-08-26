@@ -19,9 +19,12 @@ vi.mock('@services/vectorStore', () => ({
   getDocument: vi.fn(),
   deleteDocument: vi.fn(),
   createDocument: vi.fn(),
-  similaritySearch: vi.fn(),
+  hybridSearch: vi.fn(),
   computeDocumentSimilarity: vi.fn(),
   getChunkQualityStats: vi.fn(),
+  insertAuditLog: vi.fn().mockResolvedValue(undefined),
+  getSuggestedTopics: vi.fn(),
+  setDocumentTags: vi.fn(),
 }));
 
 vi.mock('@queues/documentQueue', () => ({
@@ -42,6 +45,7 @@ const MOCK_DOCUMENT: DocumentRecord = {
   chunk_count: 12,
   created_at: '2026-06-16T10:00:00.000Z',
   updated_at: '2026-06-16T10:01:30.000Z',
+  tags: [],
 };
 
 const MOCK_DOCUMENT_2: DocumentRecord = {
@@ -53,6 +57,7 @@ const MOCK_DOCUMENT_2: DocumentRecord = {
   chunk_count: 0,
   created_at: '2026-06-16T11:00:00.000Z',
   updated_at: '2026-06-16T11:00:00.000Z',
+  tags: [],
 };
 
 // ── Setup ──────────────────────────────────────────────────────────────────────
@@ -72,7 +77,7 @@ beforeEach(() => {
 
 describe('GET /api/documents', () => {
   it('returns 200 with the correct envelope shape', async () => {
-    const { listDocuments } = await import('@services/vectorStore') as {
+    const { listDocuments } = await import('@services/vectorStore') as unknown as {
       listDocuments: ReturnType<typeof vi.fn>;
     };
     listDocuments.mockResolvedValue({ data: [MOCK_DOCUMENT, MOCK_DOCUMENT_2], total: 2 });
@@ -90,7 +95,7 @@ describe('GET /api/documents', () => {
   });
 
   it('passes page and limit query params to the service', async () => {
-    const { listDocuments } = await import('@services/vectorStore') as {
+    const { listDocuments } = await import('@services/vectorStore') as unknown as {
       listDocuments: ReturnType<typeof vi.fn>;
     };
     listDocuments.mockResolvedValue({ data: [MOCK_DOCUMENT], total: 10 });
@@ -105,7 +110,7 @@ describe('GET /api/documents', () => {
   });
 
   it('passes the status filter to the service when provided', async () => {
-    const { listDocuments } = await import('@services/vectorStore') as {
+    const { listDocuments } = await import('@services/vectorStore') as unknown as {
       listDocuments: ReturnType<typeof vi.fn>;
     };
     listDocuments.mockResolvedValue({ data: [], total: 0 });
@@ -129,7 +134,7 @@ describe('GET /api/documents', () => {
 
 describe('GET /api/documents/:id', () => {
   it('returns 200 with the document in the data field', async () => {
-    const { getDocument } = await import('@services/vectorStore') as {
+    const { getDocument } = await import('@services/vectorStore') as unknown as {
       getDocument: ReturnType<typeof vi.fn>;
     };
     getDocument.mockResolvedValue(MOCK_DOCUMENT);
@@ -157,7 +162,7 @@ describe('GET /api/documents/:id', () => {
   });
 
   it('returns 404 when the document does not exist', async () => {
-    const { getDocument } = await import('@services/vectorStore') as {
+    const { getDocument } = await import('@services/vectorStore') as unknown as {
       getDocument: ReturnType<typeof vi.fn>;
     };
     const { NotFoundError } = await import('../../src/types/index.js');
@@ -176,7 +181,7 @@ describe('GET /api/documents/:id', () => {
 
 describe('DELETE /api/documents/:id', () => {
   it('returns 200 with success and documentId after deletion', async () => {
-    const { getDocument, deleteDocument } = await import('@services/vectorStore') as {
+    const { getDocument, deleteDocument } = await import('@services/vectorStore') as unknown as {
       getDocument: ReturnType<typeof vi.fn>;
       deleteDocument: ReturnType<typeof vi.fn>;
     };
@@ -194,7 +199,7 @@ describe('DELETE /api/documents/:id', () => {
   });
 
   it('calls deleteDocument service once with the correct ID', async () => {
-    const { getDocument, deleteDocument } = await import('@services/vectorStore') as {
+    const { getDocument, deleteDocument } = await import('@services/vectorStore') as unknown as {
       getDocument: ReturnType<typeof vi.fn>;
       deleteDocument: ReturnType<typeof vi.fn>;
     };
@@ -210,7 +215,7 @@ describe('DELETE /api/documents/:id', () => {
   });
 
   it('returns 404 when the document does not exist', async () => {
-    const { getDocument } = await import('@services/vectorStore') as {
+    const { getDocument } = await import('@services/vectorStore') as unknown as {
       getDocument: ReturnType<typeof vi.fn>;
     };
     const { NotFoundError } = await import('../../src/types/index.js');
@@ -234,19 +239,116 @@ describe('DELETE /api/documents/:id', () => {
   });
 });
 
+// ── PATCH /api/documents/:id/tags ──────────────────────────────────────────────
+
+describe('PATCH /api/documents/:id/tags', () => {
+  it('returns 200 with the updated tag list', async () => {
+    const { setDocumentTags } = await import('@services/vectorStore') as unknown as {
+      setDocumentTags: ReturnType<typeof vi.fn>;
+    };
+    setDocumentTags.mockResolvedValue(undefined);
+
+    const res = await authedRequest(app)
+      .patch(`/api/documents/${MOCK_DOCUMENT.id}/tags`)
+      .send({ tags: ['pricing', 'onboarding'] })
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.documentId).toBe(MOCK_DOCUMENT.id);
+    expect(res.body.data.tags).toEqual(['pricing', 'onboarding']);
+    expect(res.body.meta.correlationId).toBeDefined();
+  });
+
+  it('calls setDocumentTags with the authenticated user id for ownership scoping', async () => {
+    const { setDocumentTags } = await import('@services/vectorStore') as unknown as {
+      setDocumentTags: ReturnType<typeof vi.fn>;
+    };
+    setDocumentTags.mockResolvedValue(undefined);
+
+    await authedRequest(app)
+      .patch(`/api/documents/${MOCK_DOCUMENT.id}/tags`)
+      .send({ tags: ['pricing'] })
+      .expect(200);
+
+    expect(setDocumentTags).toHaveBeenCalledWith(MOCK_DOCUMENT.id, TEST_USER_ID, ['pricing']);
+  });
+
+  it('allows clearing all tags with an empty array', async () => {
+    const { setDocumentTags } = await import('@services/vectorStore') as unknown as {
+      setDocumentTags: ReturnType<typeof vi.fn>;
+    };
+    setDocumentTags.mockResolvedValue(undefined);
+
+    const res = await authedRequest(app)
+      .patch(`/api/documents/${MOCK_DOCUMENT.id}/tags`)
+      .send({ tags: [] })
+      .expect(200);
+
+    expect(res.body.data.tags).toEqual([]);
+  });
+
+  it('returns 404 when the document does not exist', async () => {
+    const { setDocumentTags } = await import('@services/vectorStore') as unknown as {
+      setDocumentTags: ReturnType<typeof vi.fn>;
+    };
+    const { NotFoundError } = await import('../../src/types/index.js');
+    setDocumentTags.mockRejectedValue(new NotFoundError('Document not found'));
+
+    const res = await authedRequest(app)
+      .patch('/api/documents/550e8400-e29b-41d4-a716-000000000099/tags')
+      .send({ tags: ['pricing'] })
+      .expect(404);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('NOT_FOUND');
+  });
+
+  it('returns 422 for a non-UUID id path parameter', async () => {
+    const res = await authedRequest(app)
+      .patch('/api/documents/invalid-id/tags')
+      .send({ tags: ['pricing'] })
+      .expect(422);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('UNPROCESSABLE_ENTITY');
+  });
+
+  it('returns 422 when a tag exceeds the max length', async () => {
+    const res = await authedRequest(app)
+      .patch(`/api/documents/${MOCK_DOCUMENT.id}/tags`)
+      .send({ tags: ['a'.repeat(41)] })
+      .expect(422);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('UNPROCESSABLE_ENTITY');
+  });
+
+  it('returns 422 when more than 20 tags are submitted', async () => {
+    const res = await authedRequest(app)
+      .patch(`/api/documents/${MOCK_DOCUMENT.id}/tags`)
+      .send({ tags: Array.from({ length: 21 }, (_, i) => `tag-${i}`) })
+      .expect(422);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('UNPROCESSABLE_ENTITY');
+  });
+});
+
 // ── GET /api/documents/similarity ─────────────────────────────────────────────
 
 describe('GET /api/documents/similarity', () => {
   it('returns 200 with the correct envelope shape', async () => {
-    const { computeDocumentSimilarity } = await import('@services/vectorStore') as {
+    const { computeDocumentSimilarity } = await import('@services/vectorStore') as unknown as {
       computeDocumentSimilarity: ReturnType<typeof vi.fn>;
     };
-    const { listDocuments } = await import('@services/vectorStore') as {
+    const { listDocuments } = await import('@services/vectorStore') as unknown as {
       listDocuments: ReturnType<typeof vi.fn>;
     };
-    computeDocumentSimilarity.mockResolvedValue([
-      { documentA: MOCK_DOCUMENT.id, documentB: MOCK_DOCUMENT_2.id, similarity: 0.72 },
-    ]);
+    computeDocumentSimilarity.mockResolvedValue({
+      pairs: [{ documentA: MOCK_DOCUMENT.id, documentB: MOCK_DOCUMENT_2.id, similarity: 0.72 }],
+      capped: false,
+      readyDocumentCount: 2,
+    });
     listDocuments.mockResolvedValue({ data: [MOCK_DOCUMENT], total: 1 });
 
     const res = await authedRequest(app).get('/api/documents/similarity').expect(200);
@@ -254,17 +356,18 @@ describe('GET /api/documents/similarity', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.pairs).toBeInstanceOf(Array);
     expect(res.body.data.documents).toBeInstanceOf(Array);
+    expect(res.body.data.capped).toBe(false);
     expect(res.body.meta.correlationId).toBeDefined();
   });
 
   it('passes threshold query param to the service', async () => {
-    const { computeDocumentSimilarity } = await import('@services/vectorStore') as {
+    const { computeDocumentSimilarity } = await import('@services/vectorStore') as unknown as {
       computeDocumentSimilarity: ReturnType<typeof vi.fn>;
     };
-    const { listDocuments } = await import('@services/vectorStore') as {
+    const { listDocuments } = await import('@services/vectorStore') as unknown as {
       listDocuments: ReturnType<typeof vi.fn>;
     };
-    computeDocumentSimilarity.mockResolvedValue([]);
+    computeDocumentSimilarity.mockResolvedValue({ pairs: [], capped: false, readyDocumentCount: 0 });
     listDocuments.mockResolvedValue({ data: [], total: 0 });
 
     await authedRequest(app).get('/api/documents/similarity?threshold=0.8').expect(200);
@@ -273,13 +376,13 @@ describe('GET /api/documents/similarity', () => {
   });
 
   it('returns empty pairs when fewer than 2 ready documents', async () => {
-    const { computeDocumentSimilarity } = await import('@services/vectorStore') as {
+    const { computeDocumentSimilarity } = await import('@services/vectorStore') as unknown as {
       computeDocumentSimilarity: ReturnType<typeof vi.fn>;
     };
-    const { listDocuments } = await import('@services/vectorStore') as {
+    const { listDocuments } = await import('@services/vectorStore') as unknown as {
       listDocuments: ReturnType<typeof vi.fn>;
     };
-    computeDocumentSimilarity.mockResolvedValue([]);
+    computeDocumentSimilarity.mockResolvedValue({ pairs: [], capped: false, readyDocumentCount: 1 });
     listDocuments.mockResolvedValue({ data: [MOCK_DOCUMENT], total: 1 });
 
     const res = await authedRequest(app).get('/api/documents/similarity').expect(200);
@@ -293,15 +396,17 @@ describe('GET /api/documents/similarity', () => {
     // handler. This asserts the refactor still invokes both services
     // exactly once (neither dropped nor duplicated) and that the response
     // still combines both results correctly.
-    const { computeDocumentSimilarity } = await import('@services/vectorStore') as {
+    const { computeDocumentSimilarity } = await import('@services/vectorStore') as unknown as {
       computeDocumentSimilarity: ReturnType<typeof vi.fn>;
     };
-    const { listDocuments } = await import('@services/vectorStore') as {
+    const { listDocuments } = await import('@services/vectorStore') as unknown as {
       listDocuments: ReturnType<typeof vi.fn>;
     };
-    computeDocumentSimilarity.mockResolvedValue([
-      { documentA: MOCK_DOCUMENT.id, documentB: MOCK_DOCUMENT_2.id, similarity: 0.5 },
-    ]);
+    computeDocumentSimilarity.mockResolvedValue({
+      pairs: [{ documentA: MOCK_DOCUMENT.id, documentB: MOCK_DOCUMENT_2.id, similarity: 0.5 }],
+      capped: false,
+      readyDocumentCount: 2,
+    });
     listDocuments.mockResolvedValue({ data: [MOCK_DOCUMENT, MOCK_DOCUMENT_2], total: 2 });
 
     const res = await authedRequest(app).get('/api/documents/similarity').expect(200);
@@ -317,10 +422,10 @@ describe('GET /api/documents/similarity', () => {
     // Preserves existing error-handling behavior across the Promise.all
     // refactor: if either concurrent call throws, the route's catch/next(err)
     // path must still fire.
-    const { computeDocumentSimilarity } = await import('@services/vectorStore') as {
+    const { computeDocumentSimilarity } = await import('@services/vectorStore') as unknown as {
       computeDocumentSimilarity: ReturnType<typeof vi.fn>;
     };
-    const { listDocuments } = await import('@services/vectorStore') as {
+    const { listDocuments } = await import('@services/vectorStore') as unknown as {
       listDocuments: ReturnType<typeof vi.fn>;
     };
     const { InternalError } = await import('../../src/types/index.js');
@@ -332,19 +437,102 @@ describe('GET /api/documents/similarity', () => {
     expect(res.body.success).toBe(false);
   });
 
-  it('is mounted before /:id (no conflict with "similarity" as UUID)', async () => {
-    const { computeDocumentSimilarity } = await import('@services/vectorStore') as {
+  it('surfaces capped=true and readyDocumentCount without pairs when the corpus is too large to compute', async () => {
+    const { computeDocumentSimilarity } = await import('@services/vectorStore') as unknown as {
       computeDocumentSimilarity: ReturnType<typeof vi.fn>;
     };
-    const { listDocuments } = await import('@services/vectorStore') as {
+    const { listDocuments } = await import('@services/vectorStore') as unknown as {
       listDocuments: ReturnType<typeof vi.fn>;
     };
-    computeDocumentSimilarity.mockResolvedValue([]);
+    computeDocumentSimilarity.mockResolvedValue({ pairs: [], capped: true, readyDocumentCount: 151 });
+    listDocuments.mockResolvedValue({ data: [MOCK_DOCUMENT], total: 1 });
+
+    const res = await authedRequest(app).get('/api/documents/similarity').expect(200);
+
+    expect(res.body.data.pairs).toEqual([]);
+    expect(res.body.data.capped).toBe(true);
+    expect(res.body.data.readyDocumentCount).toBe(151);
+  });
+
+  it('is mounted before /:id (no conflict with "similarity" as UUID)', async () => {
+    const { computeDocumentSimilarity } = await import('@services/vectorStore') as unknown as {
+      computeDocumentSimilarity: ReturnType<typeof vi.fn>;
+    };
+    const { listDocuments } = await import('@services/vectorStore') as unknown as {
+      listDocuments: ReturnType<typeof vi.fn>;
+    };
+    computeDocumentSimilarity.mockResolvedValue({ pairs: [], capped: false, readyDocumentCount: 0 });
     listDocuments.mockResolvedValue({ data: [], total: 0 });
 
     // "similarity" is not a valid UUID, so if the route is mounted correctly,
     // it should NOT hit the /:id route (which would return 422)
     const res = await authedRequest(app).get('/api/documents/similarity').expect(200);
+
+    expect(res.body.success).toBe(true);
+  });
+});
+
+describe('GET /api/documents/suggested-topics', () => {
+  it('returns 200 with the topics array from the service', async () => {
+    const { getSuggestedTopics } = await import('@services/vectorStore') as unknown as {
+      getSuggestedTopics: ReturnType<typeof vi.fn>;
+    };
+    getSuggestedTopics.mockResolvedValue(['Introduction', 'Pricing']);
+
+    const res = await authedRequest(app)
+      .get(`/api/documents/suggested-topics?documentIds=${MOCK_DOCUMENT.id}`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.topics).toEqual(['Introduction', 'Pricing']);
+    expect(res.body.meta.correlationId).toBeDefined();
+  });
+
+  it('parses a comma-separated documentIds list and passes it through as an array', async () => {
+    const { getSuggestedTopics } = await import('@services/vectorStore') as unknown as {
+      getSuggestedTopics: ReturnType<typeof vi.fn>;
+    };
+    getSuggestedTopics.mockResolvedValue([]);
+
+    await authedRequest(app)
+      .get(`/api/documents/suggested-topics?documentIds=${MOCK_DOCUMENT.id},${MOCK_DOCUMENT_2.id}`)
+      .expect(200);
+
+    expect(getSuggestedTopics).toHaveBeenCalledWith(
+      [MOCK_DOCUMENT.id, MOCK_DOCUMENT_2.id],
+      TEST_USER_ID,
+    );
+  });
+
+  it('returns 422 when documentIds is missing', async () => {
+    const res = await authedRequest(app).get('/api/documents/suggested-topics').expect(422);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('returns 422 when documentIds contains a non-UUID value', async () => {
+    const res = await authedRequest(app)
+      .get('/api/documents/suggested-topics?documentIds=not-a-uuid')
+      .expect(422);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('returns 422 when more than 10 documentIds are provided', async () => {
+    const ids = Array.from({ length: 11 }, (_, i) => `550e8400-e29b-41d4-a716-4466554400${String(i).padStart(2, '0')}`);
+    const res = await authedRequest(app)
+      .get(`/api/documents/suggested-topics?documentIds=${ids.join(',')}`)
+      .expect(422);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('is mounted before /:id (no conflict with "suggested-topics" as UUID)', async () => {
+    const { getSuggestedTopics } = await import('@services/vectorStore') as unknown as {
+      getSuggestedTopics: ReturnType<typeof vi.fn>;
+    };
+    getSuggestedTopics.mockResolvedValue([]);
+
+    const res = await authedRequest(app)
+      .get(`/api/documents/suggested-topics?documentIds=${MOCK_DOCUMENT.id}`)
+      .expect(200);
 
     expect(res.body.success).toBe(true);
   });
@@ -360,7 +548,7 @@ describe('GET /api/documents/similarity', () => {
 
 describe('User isolation (IDOR prevention)', () => {
   it('GET /api/documents/:id passes the authenticated userId to the service', async () => {
-    const { getDocument } = await import('@services/vectorStore') as {
+    const { getDocument } = await import('@services/vectorStore') as unknown as {
       getDocument: ReturnType<typeof vi.fn>;
     };
     getDocument.mockResolvedValue(MOCK_DOCUMENT);
@@ -373,7 +561,7 @@ describe('User isolation (IDOR prevention)', () => {
   });
 
   it("returns 404, not 403, when a document exists but belongs to another user", async () => {
-    const { getDocument } = await import('@services/vectorStore') as {
+    const { getDocument } = await import('@services/vectorStore') as unknown as {
       getDocument: ReturnType<typeof vi.fn>;
     };
     const { NotFoundError } = await import('../../src/types/index.js');
@@ -391,11 +579,11 @@ describe('User isolation (IDOR prevention)', () => {
     // Ownership is verified via getDocument BEFORE cancelDocumentJob/deleteDocument
     // run, closing the IDOR window where a caller who merely knows another
     // user's documentId could cancel that user's in-flight processing job.
-    const { getDocument, deleteDocument } = await import('@services/vectorStore') as {
+    const { getDocument, deleteDocument } = await import('@services/vectorStore') as unknown as {
       getDocument: ReturnType<typeof vi.fn>;
       deleteDocument: ReturnType<typeof vi.fn>;
     };
-    const { cancelDocumentJob } = await import('@queues/documentQueue') as {
+    const { cancelDocumentJob } = await import('@queues/documentQueue') as unknown as {
       cancelDocumentJob: ReturnType<typeof vi.fn>;
     };
     const { NotFoundError } = await import('../../src/types/index.js');
@@ -411,13 +599,29 @@ describe('User isolation (IDOR prevention)', () => {
     expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
+  it("cannot set tags on another user's document — surfaces as 404, not 403", async () => {
+    const { setDocumentTags } = await import('@services/vectorStore') as unknown as {
+      setDocumentTags: ReturnType<typeof vi.fn>;
+    };
+    const { NotFoundError } = await import('../../src/types/index.js');
+    setDocumentTags.mockRejectedValue(new NotFoundError(`Document ${MOCK_DOCUMENT.id} not found`));
+
+    const res = await authedRequest(app, OTHER_TEST_USER_ID)
+      .patch(`/api/documents/${MOCK_DOCUMENT.id}/tags`)
+      .send({ tags: ['pricing'] })
+      .expect(404);
+
+    expect(setDocumentTags).toHaveBeenCalledWith(MOCK_DOCUMENT.id, OTHER_TEST_USER_ID, ['pricing']);
+    expect(res.body.error.code).toBe('NOT_FOUND');
+  });
+
   it("similarity search never mixes in another user's documents", async () => {
-    const { computeDocumentSimilarity, listDocuments } = await import('@services/vectorStore') as {
+    const { computeDocumentSimilarity, listDocuments } = await import('@services/vectorStore') as unknown as {
       computeDocumentSimilarity: ReturnType<typeof vi.fn>;
       listDocuments: ReturnType<typeof vi.fn>;
     };
     // Service is scoped by userId — user B's KB is empty even though user A has documents.
-    computeDocumentSimilarity.mockResolvedValue([]);
+    computeDocumentSimilarity.mockResolvedValue({ pairs: [], capped: false, readyDocumentCount: 0 });
     listDocuments.mockResolvedValue({ data: [], total: 0 });
 
     const res = await authedRequest(app, OTHER_TEST_USER_ID)

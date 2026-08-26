@@ -12,6 +12,7 @@ import { env } from '../config/env.js';
 import { EmbeddingError, EmbeddingErrorCode } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { JobCancelledError } from '../queues/cancellation.js';
+import { getCachedQueryEmbedding, setCachedQueryEmbedding } from './queryEmbeddingCache.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -183,6 +184,9 @@ export async function embedText(text: string): Promise<EmbeddingResult> {
     throw new EmbeddingError('Input text is empty', EmbeddingErrorCode.EMPTY_INPUT, 400);
   }
 
+  const cached = await getCachedQueryEmbedding(text);
+  if (cached) return cached;
+
   const results = await embedBatch([text]);
   const first = results[0];
   if (first === undefined) {
@@ -192,6 +196,8 @@ export async function embedText(text: string): Promise<EmbeddingResult> {
       500,
     );
   }
+
+  await setCachedQueryEmbedding(text, first);
   return first;
 }
 

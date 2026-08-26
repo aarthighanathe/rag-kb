@@ -9,8 +9,9 @@
  * @created 2026-06-16
  */
 
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { X } from 'lucide-react';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 
 export interface CitationChipProps {
   /** Source document filename. */
@@ -60,6 +61,13 @@ export function CitationChip({
   const pct = Math.round(relevanceScore * 100);
   const panelId = `citation-panel-${index}`;
   const num = index + 1;
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Focus trap must run unconditionally (hooks rule) — it internally no-ops
+  // while `expanded` is false. Matches the same accessible dialog behavior
+  // (Tab/Shift+Tab trap, focus-in on open, focus-restore on close, Escape to
+  // close) already used by Modal.tsx and the mobile sources drawer.
+  useFocusTrap(panelRef, { open: expanded, onClose: () => setExpanded(false) });
 
   return (
     <>
@@ -91,16 +99,16 @@ export function CitationChip({
           {num}
 
           {/* Hidden text for test compatibility — getByText('research.pdf') finds this */}
-          <span className="sr-only">{documentName} {chunkRef}</span>
+          <span className="sr-only">
+            {documentName} {chunkRef}
+          </span>
         </button>
 
         {/* Document name + chunk ref — visible label next to the badge */}
         <span className="text-ds-xs font-mono text-ds-archive truncate min-w-0 max-w-[100px] sm:max-w-[160px]">
           {documentName}
         </span>
-        <span className="text-ds-xs font-mono text-ds-text-muted shrink-0">
-          {chunkRef}
-        </span>
+        <span className="text-ds-xs font-mono text-ds-text-muted shrink-0">{chunkRef}</span>
 
         {/* Relevance meter — required by tests, rendered small */}
         <span
@@ -159,6 +167,7 @@ export function CitationChip({
       {/* Full-text expansion panel */}
       {expanded && fullText && (
         <div
+          ref={panelRef}
           id={panelId}
           role="dialog"
           aria-label={`Source text: ${documentName}`}

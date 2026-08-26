@@ -9,21 +9,40 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { v4 as uuidv4 } from 'uuid';
 import { validate } from '../middleware/validate.js';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { promptInjectionGuard } from '../middleware/promptInjectionGuard.js';
 import {
   QueryRequestSchema,
   QueryStreamParamsSchema,
   QueryFeedbackParamSchema,
   QueryFeedbackRequestSchema,
+  QueryHistoryQuerySchema,
   type QueryRequest,
   type QueryFeedbackParam,
   type QueryFeedbackRequest,
+  type QueryHistoryQuery,
 } from '../schemas/query.schema.js';
 import { embedText } from '../services/embedder.js';
-import { similaritySearch, logQuery, setQueryFeedback } from '../services/vectorStore.js';
-import { streamAnswer, extractCitations, setSseHeaders } from '../services/llm.js';
+import {
+  hybridSearch,
+  logQuery,
+  setQueryFeedback,
+  setQueryValidation,
+  listQueryLogs,
+} from '../services/vectorStore.js';
+import { rerankChunks } from '../services/localReranker.js';
+import { validateAnswer } from '../services/answerValidator.js';
+import { rewriteQueryForRetrieval } from '../services/queryRewriter.js';
+import { logQuerySubmit } from '../utils/auditLogger.js';
+import {
+  streamAnswer,
+  extractCitations,
+  filterCitationsByModelOutput,
+  setSseHeaders,
+} from '../services/llm.js';
 import { sanitizeQueryText } from '../utils/sanitize.js';
 import { logger } from '../utils/logger.js';
 import { NotFoundError } from '../types/index.js';
+import { env } from '../config/env.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -150,22 +169,65 @@ const router = Router();
  * Returns a queryId that the client must pass to GET /api/query/stream.
  * Requires authentication — the resulting queryId is scoped to the caller's userId.
  */
-router.post('/', requireAuth, validate(QueryRequestSchema), (req: Request, res: Response): void => {
-  const params = req.body as QueryRequest;
-  const queryId = storePendingQuery(params, req.correlationId, req.auth!.userId);
+router.post(
+  '/',
+  requireAuth,
+  promptInjectionGuard,
+  validate(QueryRequestSchema),
+  (req: Request, res: Response): void => {
+    const params = req.body as QueryRequest;
+    const queryId = storePendingQuery(params, req.correlationId, req.auth!.userId);
 
-  logger.info('Query registered', {
-    correlationId: req.correlationId,
-    queryId,
-    queryLength: params.query.length,
-  });
+    logger.info('Query registered', {
+      correlationId: req.correlationId,
+      queryId,
+      queryLength: params.query.length,
+    });
+    logQuerySubmit(req.auth!.userId, queryId, params.query.length, true, req.correlationId);
 
-  res.json({
-    success: true,
-    data: { queryId },
-    meta: { correlationId: req.correlationId },
-  });
-});
+    res.json({
+      success: true,
+      data: { queryId },
+      meta: { correlationId: req.correlationId },
+    });
+  },
+);
+
+/**
+ * GET /api/query/history
+ * Lists (optionally text-searched) past queries from query_logs, most
+ * recent first, scoped to the caller. Mounted before /:queryId/feedback
+ * so Express never has a chance to try matching "history" against that
+ * route's own path shape.
+ */
+router.get(
+  '/history',
+  requireAuth,
+  validate(QueryHistoryQuerySchema, 'query'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const { page, limit, search } = req.query as unknown as QueryHistoryQuery;
+    const userId = req.auth!.userId;
+
+    try {
+      const { data, total } = await listQueryLogs(userId, page, limit, search);
+      res.json({
+        success: true,
+        data: data.map((row) => ({
+          id: row.id,
+          queryText: row.query_text,
+          responsePreview: row.response_preview,
+          latencyMs: row.latency_ms,
+          feedback: row.feedback,
+          validationConfidence: row.validation_confidence,
+          createdAt: row.created_at,
+        })),
+        meta: { page, total, correlationId: req.correlationId },
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 /**
  * POST /api/query/:queryId/feedback
@@ -357,14 +419,14 @@ async function handleNoChunksFound(
   ctx.endStream();
 }
 
-/** Chunks retrieved from similaritySearch, passed through to generation + logging. */
-type RetrievedChunk = Awaited<ReturnType<typeof similaritySearch>>[number];
+/** Chunks retrieved from hybridSearch, passed through to generation + logging. */
+type RetrievedChunk = Awaited<ReturnType<typeof hybridSearch>>[number];
 
 /**
  * Runs LLM generation over the retrieved chunks and streams tokens, then
  * logs the completed query and emits `complete`.
  * @param ctx - Active stream context
- * @param chunks - Chunks retrieved from similaritySearch
+ * @param chunks - Chunks retrieved from hybridSearch
  * @param citationChips - Citation view of `chunks`, echoed in the `complete` payload
  * @param safeQuery - Sanitised query text
  * @param userId - Authenticated owner of the query
@@ -417,13 +479,32 @@ async function streamGeneratedAnswer(
             });
             return null;
           });
-          ctx.emit('complete', { type: 'complete', citations: citationChips, queryLogId });
+          const citedChips = filterCitationsByModelOutput(citationChips, fullText);
+          ctx.emit('complete', { type: 'complete', citations: citedChips, queryLogId });
           ctx.endStream();
           ctx.requestLogger.info('Query stream completed', {
             queryId: ctx.queryId,
             chunkCount: chunks.length,
             historyLength: history.length,
           });
+
+          // Fired after the stream has already closed — never awaited on the
+          // response path. Runs a second (fast-model) Groq call to fact-check
+          // the answer the user already saw, purely for later display (e.g. a
+          // confidence badge on query history). Gated behind
+          // ANSWER_VALIDATION_ENABLED so operators can disable the extra
+          // Groq call (latency + cost) without a code deploy.
+          if (queryLogId && env.ANSWER_VALIDATION_ENABLED) {
+            void validateAnswer(safeQuery, fullText, chunks)
+              .then((result) =>
+                setQueryValidation(queryLogId, result.confidence, result.issues.length),
+              )
+              .catch((err: unknown) => {
+                ctx.requestLogger.warn('Post-hoc answer validation failed', {
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              });
+          }
         })();
       },
       onError: (err) => {
@@ -452,7 +533,14 @@ async function runQueryStream(ctx: StreamContext, pending: PendingQuery): Promis
 
   // Sanitize before embedding — strips HTML tags, null bytes, normalises whitespace
   const safeQuery = sanitizeQueryText(params.query);
-  const { embedding } = await embedText(safeQuery);
+  // Retrieval-only reformulation (HyDE-lite + contextual reference resolution,
+  // e.g. "what about pricing?" -> a self-contained statement using the prior
+  // turn's subject). A no-op unless QUERY_REWRITE_ENABLED. Only the embedding/
+  // search step ever sees the rewritten text — generation, citations, and
+  // logging all continue to use safeQuery, the user's actual question, so the
+  // answer is never grounded in a paraphrase the user didn't type.
+  const retrievalQuery = await rewriteQueryForRetrieval(safeQuery, params.history);
+  const { embedding } = await embedText(retrievalQuery);
   if (!ctx.isConnected()) {
     // Client already gone — nothing left to time out. Clear now rather than
     // leaving the 60s timer to expire on its own; under a burst of
@@ -461,18 +549,22 @@ async function runQueryStream(ctx: StreamContext, pending: PendingQuery): Promis
     return;
   }
 
-  const chunks = await similaritySearch(
+  const retrievedChunks = await hybridSearch(
     embedding,
+    retrievalQuery,
     params.matchCount,
     userId,
     params.documentIds,
     params.similarityThreshold,
+    params.relativeFloorGap,
+    params.keywordThreshold,
   );
   if (!ctx.isConnected()) {
     ctx.clearSseTimeout();
     return;
   }
 
+  const { chunks } = rerankChunks(safeQuery, retrievedChunks, params.matchCount);
   const citationChips = extractCitations(chunks);
   ctx.emit('found', { type: 'found', chunks: citationChips });
 
@@ -482,7 +574,15 @@ async function runQueryStream(ctx: StreamContext, pending: PendingQuery): Promis
   }
 
   ctx.emit('generating', { type: 'generating', message: 'Generating answer...' });
-  await streamGeneratedAnswer(ctx, chunks, citationChips, safeQuery, userId, params.history, startTime);
+  await streamGeneratedAnswer(
+    ctx,
+    chunks,
+    citationChips,
+    safeQuery,
+    userId,
+    params.history,
+    startTime,
+  );
 }
 
 /**

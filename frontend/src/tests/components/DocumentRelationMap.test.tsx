@@ -29,6 +29,7 @@ const MOCK_DOCS: DocumentRecord[] = [
     chunk_count: 12,
     created_at: '2026-06-16T10:00:00.000Z',
     updated_at: '2026-06-16T10:01:30.000Z',
+    tags: [],
   },
   {
     id: '550e8400-e29b-41d4-a716-446655440002',
@@ -39,6 +40,7 @@ const MOCK_DOCS: DocumentRecord[] = [
     chunk_count: 3,
     created_at: '2026-06-17T10:00:00.000Z',
     updated_at: '2026-06-17T10:01:00.000Z',
+    tags: [],
   },
   {
     id: '550e8400-e29b-41d4-a716-446655440003',
@@ -49,6 +51,7 @@ const MOCK_DOCS: DocumentRecord[] = [
     chunk_count: 5,
     created_at: '2026-06-18T10:00:00.000Z',
     updated_at: '2026-06-18T10:01:00.000Z',
+    tags: [],
   },
 ];
 

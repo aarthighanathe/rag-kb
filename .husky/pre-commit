@@ -7,10 +7,12 @@ set -e
 
 echo "🔍 Running pre-commit checks..."
 
-# 1. ESLint with auto-fix on staged backend files
+# 1. ESLint/Prettier on staged files. Run from repo root so lint-staged's
+#    root-relative glob patterns in package.json match correctly; eslint and
+#    prettier live under backend/ and frontend/'s own node_modules (not
+#    hoisted to the root), so both bin dirs are added to PATH for this step.
 echo "\n→ ESLint..."
-cd backend && npx lint-staged --config ../package.json
-cd ..
+PATH="$PWD/backend/node_modules/.bin:$PWD/frontend/node_modules/.bin:$PATH" npx lint-staged
 
 # 2. Type-check (no emit — just verify types)
 echo "\n→ Type-check..."

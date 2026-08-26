@@ -21,7 +21,7 @@ export interface HistoryEntry {
   confidenceLevel: ConfidenceLevel | 'none';
 }
 
-const STORAGE_KEY = 'rag-kb:query-history';
+const STORAGE_KEY = 'lumina:query-history';
 const MAX_ENTRIES = 10;
 
 /**
@@ -100,9 +100,7 @@ export function addToHistory(entry: Omit<HistoryEntry, 'id'>): void {
     const trimmedQuery = entry.query.trim().toLowerCase();
 
     // Remove any existing entry with the same query (case-insensitive)
-    const filtered = existing.filter(
-      (e) => e.query.trim().toLowerCase() !== trimmedQuery,
-    );
+    const filtered = existing.filter((e) => e.query.trim().toLowerCase() !== trimmedQuery);
 
     // Create new entry with generated ID
     const newEntry: HistoryEntry = {

@@ -33,10 +33,10 @@ const rateLimitHeaders = {
 export const swaggerSpec = {
   openapi: '3.0.3',
   info: {
-    title: 'RAG Knowledge Base API',
+    title: 'Lumina API',
     version: '1.0.0',
     description: [
-      'Upload documents (PDF, DOCX, TXT, MD), query them via RAG with streamed LLM answers,',
+      'Upload documents (PDF, DOCX, TXT, MD, HTML), query them via RAG with streamed LLM answers,',
       'and manage your knowledge base. All success responses use the envelope:',
       '`{ success: true, data: T, meta?: { page?, total?, correlationId } }`.',
       'All error responses use: `{ success: false, error: { code, message, details? }, correlationId }`.',
@@ -126,6 +126,148 @@ export const swaggerSpec = {
       },
     },
 
+    '/health': {
+      get: {
+        tags: ['Health'],
+        summary: 'Basic liveness check',
+        operationId: 'getHealthRoot',
+        description:
+          'The process is up and can answer HTTP requests. Does not check any ' +
+          'dependency and does not use the standard {success,data,meta} envelope — ' +
+          'mirrors the top-level GET /health in app.ts. No authentication required.',
+        security: [],
+        responses: {
+          '200': {
+            description: 'Process is up',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PlainHealthResponse' },
+                example: { status: 'ok', timestamp: '2026-06-16T12:00:00.000Z' },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    '/health/detailed': {
+      get: {
+        tags: ['Health'],
+        summary: 'Full dependency health breakdown',
+        operationId: 'getHealthDetailed',
+        description:
+          'Runs the same dependency check as GET /api/health (Supabase, Redis, ' +
+          "HuggingFace, Groq) but returns it under this route's own plain response " +
+          'shape rather than the {success,data,meta} envelope. 503 if any dependency ' +
+          'is unreachable. No authentication required.',
+        security: [],
+        responses: {
+          '200': {
+            description: 'All dependencies reachable',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PlainHealthDetailedResponse' },
+                example: {
+                  status: 'healthy',
+                  timestamp: '2026-06-16T12:00:00.000Z',
+                  checks: {
+                    supabase: { status: 'ok' },
+                    redis: { status: 'ok' },
+                    huggingface: { status: 'ok' },
+                    groq: { status: 'ok' },
+                  },
+                },
+              },
+            },
+          },
+          '503': {
+            description: 'One or more dependencies unreachable',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PlainHealthDetailedResponse' },
+                example: {
+                  status: 'unhealthy',
+                  timestamp: '2026-06-16T12:00:00.000Z',
+                  checks: {
+                    supabase: { status: 'ok' },
+                    redis: { status: 'error', error: 'Redis PING check timed out after 3000ms' },
+                    huggingface: { status: 'ok' },
+                    groq: { status: 'ok' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    '/health/ready': {
+      get: {
+        tags: ['Health'],
+        summary: 'Readiness probe',
+        operationId: 'getHealthReady',
+        description:
+          'Returns 200 only if every dependency is reachable, so an orchestrator can ' +
+          'hold traffic back from an instance that is up but not actually able to ' +
+          'serve requests. No authentication required.',
+        security: [],
+        responses: {
+          '200': {
+            description: 'Ready to receive traffic',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PlainHealthResponse' },
+                example: { status: 'ready', timestamp: '2026-06-16T12:00:00.000Z' },
+              },
+            },
+          },
+          '503': {
+            description: 'Not ready — one or more dependencies unreachable',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PlainHealthDetailedResponse' },
+                example: {
+                  status: 'not_ready',
+                  timestamp: '2026-06-16T12:00:00.000Z',
+                  checks: {
+                    supabase: { status: 'ok' },
+                    redis: { status: 'error', error: 'Redis PING check timed out after 3000ms' },
+                    huggingface: { status: 'ok' },
+                    groq: { status: 'ok' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    '/health/live': {
+      get: {
+        tags: ['Health'],
+        summary: 'Liveness probe',
+        operationId: 'getHealthLive',
+        description:
+          'The process is alive — no dependency checks. An orchestrator should ' +
+          "restart the instance if this doesn't respond, but should not use it to " +
+          "gate traffic routing (that is /health/ready's job). No authentication required.",
+        security: [],
+        responses: {
+          '200': {
+            description: 'Process is alive',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/PlainHealthResponse' },
+                example: { status: 'alive', timestamp: '2026-06-16T12:00:00.000Z' },
+              },
+            },
+          },
+        },
+      },
+    },
+
     // ── Upload ──────────────────────────────────────────────────────────────────
     '/api/upload': {
       post: {
@@ -134,7 +276,7 @@ export const swaggerSpec = {
         operationId: 'uploadDocuments',
         description: [
           'Accepts 1–5 files via multipart/form-data. Each file is validated by magic bytes',
-          '(not just extension). Accepted types: PDF, DOCX, TXT, MD. Maximum 10 MB per file.',
+          '(not just extension). Accepted types: PDF, DOCX, TXT, MD, HTML. Maximum 10 MB per file.',
           'Returns immediately with document IDs and job IDs — processing is async.',
         ].join(' '),
         requestBody: {
@@ -205,7 +347,10 @@ export const swaggerSpec = {
                       },
                     ],
                     errors: [
-                      { filename: 'bad-file.exe.pdf', message: 'Invalid filename: double extension' },
+                      {
+                        filename: 'bad-file.exe.pdf',
+                        message: 'Invalid filename: double extension',
+                      },
                     ],
                   },
                   meta: { correlationId: '550e8400-e29b-41d4-a716-446655440000' },
@@ -379,6 +524,62 @@ export const swaggerSpec = {
       },
     },
 
+    // ── Documents — Tags ───────────────────────────────────────────────────────
+    '/api/documents/{id}/tags': {
+      patch: {
+        tags: ['Documents'],
+        summary: "Replace a document's tags",
+        operationId: 'updateDocumentTags',
+        description: [
+          'Replaces the full tag list for a document. Tags are either auto-derived from',
+          'detected section headings during processing, or manually set by the owner via',
+          'this endpoint — both share the same field, so this call overwrites auto-tags too.',
+        ].join(' '),
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            description: 'Document UUID',
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: { $ref: '#/components/schemas/UpdateDocumentTagsRequest' },
+              example: { tags: ['pricing', 'onboarding'] },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Tags updated successfully',
+            headers: { ...correlationIdHeader },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/UpdateDocumentTagsResponse' },
+                example: {
+                  success: true,
+                  data: {
+                    documentId: '550e8400-e29b-41d4-a716-446655440001',
+                    tags: ['pricing', 'onboarding'],
+                  },
+                  meta: { correlationId: '550e8400-e29b-41d4-a716-446655440000' },
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/BadRequest' },
+          '404': { $ref: '#/components/responses/NotFound' },
+          '422': { $ref: '#/components/responses/UnprocessableEntity' },
+          '429': { $ref: '#/components/responses/RateLimited' },
+          '500': { $ref: '#/components/responses/InternalServerError' },
+        },
+      },
+    },
+
     // ── Documents — Similarity ────────────────────────────────────────────────
     '/api/documents/similarity': {
       get: {
@@ -389,7 +590,11 @@ export const swaggerSpec = {
           'Computes average cosine similarity between each pair of ready documents',
           'by sampling up to 5 representative chunks per document and averaging',
           'pairwise scores. Only returns pairs with similarity above the minimum',
-          'threshold. Requires at least 2 ready documents.',
+          'threshold. Requires at least 2 ready documents. Every document is capped',
+          'at its 8 strongest edges so a "hub" document similar to many others does',
+          'not produce an unreadably dense result. If the caller has more than 150',
+          'ready documents, computation is skipped entirely and `capped: true` is',
+          'returned with an empty `pairs` array — see `readyDocumentCount`.',
         ].join(' '),
         parameters: [
           {
@@ -409,18 +614,73 @@ export const swaggerSpec = {
                 example: {
                   success: true,
                   data: {
-                    pairs: [
-                      { documentA: 'uuid-1', documentB: 'uuid-2', similarity: 0.72 },
-                    ],
+                    pairs: [{ documentA: 'uuid-1', documentB: 'uuid-2', similarity: 0.72 }],
                     documents: [
-                      { id: 'uuid-1', filename: 'report.pdf', mime_type: 'application/pdf', size_bytes: 204800, status: 'ready', chunk_count: 12, created_at: '2026-06-16T10:00:00.000Z', updated_at: '2026-06-16T10:01:30.000Z' },
+                      {
+                        id: 'uuid-1',
+                        filename: 'report.pdf',
+                        mime_type: 'application/pdf',
+                        size_bytes: 204800,
+                        status: 'ready',
+                        chunk_count: 12,
+                        created_at: '2026-06-16T10:00:00.000Z',
+                        updated_at: '2026-06-16T10:01:30.000Z',
+                      },
                     ],
+                    capped: false,
+                    readyDocumentCount: 2,
                   },
                   meta: { correlationId: '550e8400-e29b-41d4-a716-446655440000' },
                 },
               },
             },
           },
+          '429': { $ref: '#/components/responses/RateLimited' },
+          '500': { $ref: '#/components/responses/InternalServerError' },
+        },
+      },
+    },
+
+    '/api/documents/suggested-topics': {
+      get: {
+        tags: ['Documents'],
+        summary: 'Get content-aware query suggestions for the given documents',
+        operationId: 'getSuggestedTopics',
+        description: [
+          "Returns up to 8 distinct section headings drawn from the given documents' chunks",
+          '(populated by section-aware chunking for documents with real structure — headings,',
+          'numbered sections). Intended for building "Tell me about X" query suggestions in the',
+          'chat UI instead of generic hardcoded prompts. Returns an empty array for documents',
+          'with no detected section structure (e.g. plain unstructured text) — the client falls',
+          'back to generic suggestions in that case. MUST be mounted before /:id to avoid Express',
+          'matching "suggested-topics" as a UUID.',
+        ].join(' '),
+        parameters: [
+          {
+            name: 'documentIds',
+            in: 'query',
+            required: true,
+            description: 'Comma-separated list of document UUIDs (1-10)',
+            schema: { type: 'string' },
+            example: '550e8400-e29b-41d4-a716-446655440001,550e8400-e29b-41d4-a716-446655440002',
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Distinct section headings across the given (owned) documents',
+            headers: { ...correlationIdHeader },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SuggestedTopicsResponse' },
+                example: {
+                  success: true,
+                  data: { topics: ['Introduction', 'Pricing', 'Getting Started'] },
+                  meta: { correlationId: '550e8400-e29b-41d4-a716-446655440000' },
+                },
+              },
+            },
+          },
+          '422': { $ref: '#/components/responses/UnprocessableEntity' },
           '429': { $ref: '#/components/responses/RateLimited' },
           '500': { $ref: '#/components/responses/InternalServerError' },
         },
@@ -475,6 +735,74 @@ export const swaggerSpec = {
       },
     },
 
+    '/api/query/history': {
+      get: {
+        tags: ['Query'],
+        summary: "Search the caller's full query history",
+        operationId: 'getQueryHistory',
+        description: [
+          'Lists (optionally text-searched) past queries from `query_logs`, most recent first,',
+          'scoped to the caller. This is the durable full history — distinct from the 10-entry',
+          'localStorage cache the frontend also keeps for instant client-side access without a',
+          'round-trip. MUST be mounted before any `/:queryId`-shaped route to avoid Express',
+          'matching "history" as a UUID.',
+        ].join(' '),
+        parameters: [
+          {
+            name: 'page',
+            in: 'query',
+            description: 'Page number (1-based)',
+            schema: { type: 'integer', minimum: 1, default: 1 },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            description: 'Results per page',
+            schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 },
+          },
+          {
+            name: 'search',
+            in: 'query',
+            description: 'Case-insensitive substring match against past query text',
+            schema: { type: 'string', maxLength: 200 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Paginated query history',
+            headers: { ...correlationIdHeader, ...rateLimitHeaders },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/QueryHistoryResponse' },
+                example: {
+                  success: true,
+                  data: [
+                    {
+                      id: '550e8400-e29b-41d4-a716-446655440099',
+                      queryText: 'What is the refund policy?',
+                      responsePreview: 'Refunds are issued within 14 days...',
+                      latencyMs: 1240,
+                      feedback: 'helpful',
+                      validationConfidence: 0.92,
+                      createdAt: '2026-06-16T12:00:00.000Z',
+                    },
+                  ],
+                  meta: {
+                    page: 1,
+                    total: 1,
+                    correlationId: '550e8400-e29b-41d4-a716-446655440000',
+                  },
+                },
+              },
+            },
+          },
+          '422': { $ref: '#/components/responses/UnprocessableEntity' },
+          '429': { $ref: '#/components/responses/RateLimited' },
+          '500': { $ref: '#/components/responses/InternalServerError' },
+        },
+      },
+    },
+
     '/api/query/{queryId}/feedback': {
       post: {
         tags: ['Query'],
@@ -482,13 +810,13 @@ export const swaggerSpec = {
         operationId: 'submitQueryFeedback',
         description: [
           'Records (or updates) a helpfulness rating for a previously completed query.',
-          '`queryId` here is the `query_logs` row id returned in the SSE `complete` event\'s',
+          "`queryId` here is the `query_logs` row id returned in the SSE `complete` event's",
           'payload — NOT the ephemeral queryId used by `POST /api/query` / `GET /api/query/stream`,',
           'which is single-use and deleted once the stream starts.',
           '',
           'Idempotent: resubmitting feedback for the same query overwrites the prior value',
           'rather than erroring or creating a duplicate. Scoped to the caller — a queryId',
-          'belonging to another user returns 404, not 403, matching this API\'s IDOR-prevention',
+          "belonging to another user returns 404, not 403, matching this API's IDOR-prevention",
           'convention elsewhere (an attacker cannot distinguish "not yours" from "doesn\'t exist").',
         ].join(' '),
         parameters: [
@@ -668,6 +996,49 @@ export const swaggerSpec = {
       },
     },
 
+    '/api/queue/cache-stats': {
+      get: {
+        tags: ['Queue'],
+        summary: 'Get query-embedding cache hit/miss stats (admin)',
+        operationId: 'getCacheStats',
+        description:
+          'Returns in-process hit/miss/error counters for the Redis-backed query-embedding cache ' +
+          '(queryEmbeddingCache.ts), plus the derived hit rate. Counters reset on process restart ' +
+          'and are not aggregated across instances. Requires `X-Admin-Secret` header.',
+        security: [{ adminSecret: [] }],
+        responses: {
+          '200': {
+            description: 'Cache instrumentation snapshot',
+            headers: { ...correlationIdHeader },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/CacheStats' },
+                example: { hits: 34, misses: 66, errors: 0, hitRatePercent: 34 },
+              },
+            },
+          },
+          '401': {
+            description: 'Missing X-Admin-Secret header',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorEnvelope' },
+              },
+            },
+          },
+          '403': {
+            description: 'Invalid admin secret',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorEnvelope' },
+              },
+            },
+          },
+          '429': { $ref: '#/components/responses/RateLimited' },
+          '500': { $ref: '#/components/responses/InternalServerError' },
+        },
+      },
+    },
+
     '/api/queue/job/{jobId}': {
       get: {
         tags: ['Queue'],
@@ -804,6 +1175,37 @@ export const swaggerSpec = {
         },
       },
 
+      PlainHealthResponse: {
+        type: 'object',
+        description:
+          'Response shape used by /health, /health/ready, and /health/live — no {success,data,meta} envelope.',
+        required: ['status', 'timestamp'],
+        properties: {
+          status: { type: 'string', enum: ['ok', 'ready', 'not_ready', 'alive'] },
+          timestamp: { type: 'string', format: 'date-time' },
+        },
+      },
+
+      PlainHealthDetailedResponse: {
+        type: 'object',
+        description:
+          'Response shape used by /health/detailed and the 503 case of /health/ready — no {success,data,meta} envelope.',
+        required: ['status', 'timestamp'],
+        properties: {
+          status: { type: 'string', enum: ['healthy', 'unhealthy', 'not_ready'] },
+          timestamp: { type: 'string', format: 'date-time' },
+          checks: {
+            type: 'object',
+            properties: {
+              supabase: { $ref: '#/components/schemas/DependencyCheck' },
+              redis: { $ref: '#/components/schemas/DependencyCheck' },
+              huggingface: { $ref: '#/components/schemas/DependencyCheck' },
+              groq: { $ref: '#/components/schemas/DependencyCheck' },
+            },
+          },
+        },
+      },
+
       Document: {
         type: 'object',
         required: [
@@ -857,6 +1259,22 @@ export const swaggerSpec = {
           filename: { type: 'string' },
           status: { type: 'string', enum: ['pending'] },
           jobId: { type: 'string', description: 'BullMQ job ID for tracking processing progress' },
+          duplicateOf: {
+            type: 'object',
+            nullable: true,
+            description:
+              "Present only when this upload's content (SHA-256 of the raw file bytes) matches an existing document already owned by the caller. Informational only — the upload still proceeds and creates a new document; this is a hint the client can use to warn the user, not a block.",
+            properties: {
+              id: {
+                type: 'string',
+                format: 'uuid',
+                description: 'ID of the earlier document with identical content',
+              },
+              filename: { type: 'string' },
+              status: { type: 'string', enum: ['pending', 'processing', 'ready', 'failed'] },
+              createdAt: { type: 'string', format: 'date-time' },
+            },
+          },
         },
       },
 
@@ -963,7 +1381,7 @@ export const swaggerSpec = {
           success: { type: 'boolean', enum: [true] },
           data: {
             type: 'object',
-            required: ['pairs', 'documents'],
+            required: ['pairs', 'documents', 'capped', 'readyDocumentCount'],
             properties: {
               pairs: {
                 type: 'array',
@@ -981,6 +1399,80 @@ export const swaggerSpec = {
                 type: 'array',
                 items: { $ref: '#/components/schemas/Document' },
               },
+              capped: {
+                type: 'boolean',
+                description:
+                  'True when readyDocumentCount exceeded the 150-document computation ceiling — pairs is always empty in that case',
+              },
+              readyDocumentCount: {
+                type: 'integer',
+                minimum: 0,
+                description:
+                  "Count of the caller's ready documents considered, whether or not computation actually ran",
+              },
+            },
+          },
+          meta: {
+            type: 'object',
+            properties: {
+              correlationId: { type: 'string', format: 'uuid' },
+            },
+          },
+        },
+      },
+
+      SuggestedTopicsResponse: {
+        type: 'object',
+        required: ['success', 'data'],
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          data: {
+            type: 'object',
+            required: ['topics'],
+            properties: {
+              topics: {
+                type: 'array',
+                items: { type: 'string' },
+                maxItems: 8,
+                description:
+                  "Distinct section headings drawn from the given documents' chunks, in first-seen order",
+              },
+            },
+          },
+          meta: {
+            type: 'object',
+            properties: {
+              correlationId: { type: 'string', format: 'uuid' },
+            },
+          },
+        },
+      },
+
+      UpdateDocumentTagsRequest: {
+        type: 'object',
+        required: ['tags'],
+        properties: {
+          tags: {
+            type: 'array',
+            items: { type: 'string', minLength: 1, maxLength: 40 },
+            maxItems: 20,
+            description:
+              "Replaces the document's full tag list (both auto-derived and manually-added tags share this one field)",
+          },
+        },
+      },
+
+      UpdateDocumentTagsResponse: {
+        type: 'object',
+        required: ['success', 'data'],
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          data: {
+            type: 'object',
+            required: ['documentId', 'tags'],
+            properties: {
+              documentId: { type: 'string', format: 'uuid' },
+              tags: { type: 'array', items: { type: 'string' } },
             },
           },
           meta: {
@@ -1031,7 +1523,8 @@ export const swaggerSpec = {
             type: 'array',
             maxItems: 6,
             default: [],
-            description: 'Previous conversation turns (oldest first). Max 6 msgs = 3 user+assistant exchanges. Each content capped at 2000 chars.',
+            description:
+              'Previous conversation turns (oldest first). Max 6 msgs = 3 user+assistant exchanges. Each content capped at 2000 chars.',
             items: {
               type: 'object',
               required: ['role', 'content'],
@@ -1102,6 +1595,38 @@ export const swaggerSpec = {
         },
       },
 
+      QueryHistoryResponse: {
+        type: 'object',
+        required: ['success', 'data'],
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          data: {
+            type: 'array',
+            items: {
+              type: 'object',
+              required: ['id', 'queryText', 'createdAt'],
+              properties: {
+                id: { type: 'string', format: 'uuid' },
+                queryText: { type: 'string' },
+                responsePreview: { type: 'string', nullable: true },
+                latencyMs: { type: 'integer', nullable: true },
+                feedback: { type: 'string', enum: ['helpful', 'not_helpful'], nullable: true },
+                validationConfidence: { type: 'number', minimum: 0, maximum: 1, nullable: true },
+                createdAt: { type: 'string', format: 'date-time' },
+              },
+            },
+          },
+          meta: {
+            type: 'object',
+            properties: {
+              page: { type: 'integer' },
+              total: { type: 'integer' },
+              correlationId: { type: 'string', format: 'uuid' },
+            },
+          },
+        },
+      },
+
       CitationChip: {
         type: 'object',
         required: ['documentId', 'filename', 'chunkId', 'similarity', 'excerpt'],
@@ -1120,6 +1645,35 @@ export const swaggerSpec = {
           'Server-Sent Events stream. Each event is separated by \\n\\n.',
           'Event types: searching | found | generating | token | complete | error',
         ].join(' '),
+      },
+
+      CacheStats: {
+        type: 'object',
+        required: ['hits', 'misses', 'errors', 'hitRatePercent'],
+        properties: {
+          hits: {
+            type: 'integer',
+            description: 'Query-embedding cache hits since process start',
+            minimum: 0,
+          },
+          misses: {
+            type: 'integer',
+            description: 'Query-embedding cache misses since process start (includes Redis errors)',
+            minimum: 0,
+          },
+          errors: {
+            type: 'integer',
+            description: 'Redis errors encountered during cache lookups (a subset of misses)',
+            minimum: 0,
+          },
+          hitRatePercent: {
+            type: 'number',
+            description:
+              'hits / (hits + misses) as a percentage, 0 when no lookups have occurred yet',
+            minimum: 0,
+            maximum: 100,
+          },
+        },
       },
 
       QueueStatus: {
@@ -1284,4 +1838,3 @@ export const swaggerSpec = {
     },
   },
 };
-

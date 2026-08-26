@@ -1,6 +1,6 @@
-# RAG Knowledge Base
+# Lumina
 
-A production-grade Retrieval-Augmented Generation system. Upload documents (PDF, TXT, MD, DOCX), ask questions, and receive streamed answers with source citations — powered by HuggingFace embeddings, Supabase pgvector, and Groq LLM.
+A production-grade Retrieval-Augmented Generation system. Upload documents (PDF, TXT, MD, DOCX, HTML), ask questions, and receive streamed answers with source citations — powered by HuggingFace embeddings, Supabase pgvector, and Groq LLM.
 
 ---
 
@@ -77,17 +77,17 @@ always remote/cloud-hosted — there is no local Postgres container.
 1. User drops or selects files in `FileDropzone` (Upload.tsx).
 2. `ragStore.addToUploadQueue()` adds them as `queued` items in the Zustand store.
 3. User clicks "File N document(s) →"; `ragStore.startUpload()` calls `uploadDocument()` (`api.ts`, XHR with progress events) for each file → `POST /api/upload`.
-4. Backend: `requireAuth` (Clerk JWT) → `multer` (MIME allowlist + size/count limits) → `UploadRequestSchema` (Zod) → `validateFile()` (magic bytes, filename security, zip-bomb check) → file written to `backend/uploads/{uuid}_{name}` → `documents` row inserted (`status: pending`, owned by the authenticated user) → BullMQ job enqueued (`jobId = documentId`) → HTTP response returns immediately.
+4. Backend: `requireAuth` (Clerk JWT) → `multer` (MIME allowlist + size/count limits) → `UploadRequestSchema` (Zod) → `validateFile()` (magic bytes, filename security, zip-bomb check) → file buffer staged in the Supabase Storage `documents` bucket under key `{documentId}_{sanitizedName}` (not local disk — a redeploy/restart on an ephemeral host like Render would otherwise wipe the file before the worker reads it) → `documents` row inserted (`status: pending`, owned by the authenticated user) → BullMQ job enqueued (`jobId = documentId`) → HTTP response returns immediately.
 5. Frontend marks the item `processing` and starts polling `GET /api/documents/:id` every 3 seconds (`startPolling` in `ragStore.ts`).
-6. BullMQ worker (concurrency 1) picks up the job: extract text (PDF/DOCX/TXT/MD) → chunk (512 tokens, 50 overlap) → embed in batches of 32 via HuggingFace → upsert chunks + embeddings into `document_chunks` → set `documents.status = 'ready'` → delete the temp upload file.
+6. BullMQ worker (concurrency 1) picks up the job: extract text (PDF/DOCX/TXT/MD/HTML) → chunk (512 tokens, 50 overlap, section-aware) → embed in batches of 32 via HuggingFace → upsert chunks + embeddings into `document_chunks` → auto-derive tags from detected section headings → set `documents.status = 'ready'` → delete the staged file from Supabase Storage.
 7. Next poll tick sees `status: ready`, stops polling, and the item moves from "FILING QUEUE" to "JUST FILED" in the UI.
 
 ### Query flow
 1. User types a question into the Chat textarea and submits (`sendQuery` in `ragStore.ts`).
-2. Frontend: user turn added to `conversationHistory`; `POST /api/query` sent (with the user's Clerk JWT) with `{query, documentIds?, matchCount, similarityThreshold, history}`.
+2. Frontend: user turn added to `conversationHistory`; `POST /api/query` sent (with the user's Clerk JWT) with `{query, documentIds?, matchCount, similarityThreshold, relativeFloorGap?, history}`.
 3. Backend stores the validated query in an in-memory map keyed by a new `queryId` (2-minute TTL) and returns `{queryId}` immediately.
 4. Frontend opens `GET /api/query/stream?queryId=...` via `useSSE` (native `EventSource`, with exponential-backoff reconnect up to 3 attempts). This route can't carry the JWT (EventSource has no custom-header support), so it trusts the unguessable, single-use `queryId` instead.
-5. Backend: consumes the pending query → emits `searching` → sanitizes the query text → embeds it via HuggingFace → calls the `match_chunks` Supabase RPC (cosine similarity, IVFFlat index, scoped to the query's owner) → emits `found` with citation data.
+5. Backend: consumes the pending query → emits `searching` → runs the query through the prompt-injection guard → sanitizes the query text → embeds it via HuggingFace (cache-checked first) → calls the `match_chunks` Supabase RPC (cosine similarity, IVFFlat index, relative-similarity floor, scoped to the query's owner) → re-ranks the results locally (similarity + keyword overlap) → emits `found` with citation data.
 6. If chunks were retrieved, backend emits `generating`, then streams the Groq `llama-3.1-8b-instant` completion token-by-token as `token` events (system prompt + capped history + formatted context chunks + query).
 7. Backend emits `complete` with final citations and latency; SSE connection closes.
 8. Frontend: each `token` event appends to the streaming assistant message; on `complete`, citations are attached and the assistant turn is added to conversation history.
@@ -123,41 +123,57 @@ rag-kb/
 │   │   ├── config/
 │   │   │   └── env.ts              # Zod-validated env vars, fail-fast on startup
 │   │   ├── middleware/
-│   │   │   ├── security.ts         # Helmet config + CORS allowlist
-│   │   │   ├── correlationId.ts    # UUID v4 request tagging
-│   │   │   ├── rateLimit.ts        # Per-route express-rate-limit instances
-│   │   │   ├── validate.ts         # Generic Zod-schema validation middleware
-│   │   │   └── errorHandler.ts     # Global error → JSON envelope translator
+│   │   │   ├── security.ts             # Helmet config + CORS allowlist
+│   │   │   ├── correlationId.ts        # UUID v4 request tagging
+│   │   │   ├── rateLimit.ts            # Per-route express-rate-limit instances
+│   │   │   ├── validate.ts             # Generic Zod-schema validation middleware
+│   │   │   ├── requireAuth.ts          # Clerk JWT verification
+│   │   │   ├── promptInjectionGuard.ts # Query-text prompt-injection detection (POST /api/query)
+│   │   │   └── errorHandler.ts         # Global error → JSON envelope translator
 │   │   ├── routes/
 │   │   │   ├── upload.ts           # POST /api/upload — file upload with progress
-│   │   │   ├── query.ts            # POST /api/query + GET /api/query/stream (SSE)
-│   │   │   ├── documents.ts        # GET/DELETE /api/documents, GET /api/documents/similarity
-│   │   │   └── queue.ts            # GET /api/queue/status, GET /api/queue/job/:jobId
+│   │   │   ├── query.ts            # POST /api/query + GET /api/query/stream (SSE) + GET /api/query/history
+│   │   │   ├── documents.ts        # GET/PATCH/DELETE /api/documents, similarity, suggested-topics
+│   │   │   ├── queue.ts            # GET /api/queue/status, GET /api/queue/job/:jobId
+│   │   │   └── health.ts           # GET /health/{live,ready,detailed} — thin layer over utils/readiness.ts
 │   │   ├── schemas/
 │   │   │   ├── upload.schema.ts    # Zod schema for upload requests
 │   │   │   ├── query.schema.ts     # Zod schema for query requests
-│   │   │   └── document.schema.ts  # Zod schema for document queries
+│   │   │   ├── document.schema.ts  # Zod schema for document queries/tags
+│   │   │   ├── queue.schema.ts     # Zod schema for admin queue endpoints
+│   │   │   └── common.schema.ts    # Shared schema fragments (e.g. UUID params)
 │   │   ├── services/
-│   │   │   ├── chunker.ts          # Text chunking (token-aware, hierarchical split)
-│   │   │   ├── embedder.ts         # HuggingFace embedding (all-MiniLM-L6-v2)
-│   │   │   ├── llm.ts             # Groq LLM streaming (llama-3.1-8b-instant)
-│   │   │   └── vectorStore.ts     # Supabase pgvector ops, similarity, chunk quality
+│   │   │   ├── chunker.ts              # Text chunking (token-aware, section-aware, hierarchical split)
+│   │   │   ├── embedder.ts             # HuggingFace embedding (all-MiniLM-L6-v2)
+│   │   │   ├── queryEmbeddingCache.ts  # Redis cache for single-query embeddings
+│   │   │   ├── localReranker.ts        # Local similarity+keyword-overlap re-ranking (no external API)
+│   │   │   ├── queryRewriter.ts        # Optional HyDE-lite query rewrite + contextual retrieval
+│   │   │   ├── llm.ts                  # Groq LLM streaming (llama-3.1-8b-instant)
+│   │   │   ├── answerValidator.ts      # Post-hoc answer validation (hallucination/contradiction checks)
+│   │   │   ├── vectorStore.ts          # Supabase pgvector ops, similarity, tags, chunk quality
+│   │   │   ├── storage.ts              # Supabase Storage staging (upload → worker handoff)
+│   │   │   ├── backupService.ts        # pg_dump / Supabase-API table export + restore
+│   │   │   └── dataRetention.ts        # Expired query_logs / audit_logs cleanup
 │   │   ├── queues/
 │   │   │   ├── documentQueue.ts    # BullMQ queue definition + job helpers
+│   │   │   ├── cancellation.ts     # Per-attempt AbortController registry
 │   │   │   └── workers/
-│   │   │       ├── documentWorker.ts  # extract→chunk→embed→store pipeline
+│   │   │       ├── documentWorker.ts  # extract→chunk→embed→store→auto-tag pipeline
 │   │   │       └── index.ts           # Worker registration
 │   │   ├── utils/
-│   │   │   ├── fileValidator.ts    # Magic bytes, zip bomb, filename security
-│   │   │   ├── sanitize.ts         # Input sanitization (HTML, null bytes, query text)
-│   │   │   ├── logger.ts           # Winston structured JSON logger
-│   │   │   ├── errors.ts           # Custom error classes
-│   │   │   └── dbError.ts          # Database error mapping
+│   │   │   ├── fileValidator.ts        # Magic bytes, zip bomb, filename security
+│   │   │   ├── sanitize.ts             # Input sanitization (HTML, null bytes, query text)
+│   │   │   ├── promptInjectionFilter.ts # Pattern/keyword-density injection risk classification
+│   │   │   ├── auditLogger.ts          # Winston + durable audit_logs writes
+│   │   │   ├── readiness.ts            # Supabase/Redis/HuggingFace/Groq dependency checks
+│   │   │   ├── logger.ts               # Winston structured JSON logger
+│   │   │   ├── errors.ts               # Custom error classes
+│   │   │   └── dbError.ts              # Database error mapping
 │   │   ├── types/
 │   │   │   └── index.ts            # Shared TS types (AppError, domain types, Supabase row types)
 │   │   └── swagger/
 │   │       └── spec.ts             # OpenAPI 3.0 spec (served at /api/docs)
-│   ├── scripts/                    # migrate.ts, check-supabase.ts (DB setup CLIs)
+│   ├── scripts/                    # migrate.ts, check-supabase.ts, backup.ts (DB/backup CLIs)
 │   ├── tests/
 │   │   ├── unit/                   # Vitest unit tests
 │   │   └── integration/            # Vitest integration tests (Supertest)
@@ -183,45 +199,57 @@ rag-kb/
 │   │   │       ├── Badge.tsx               # Status/label pill
 │   │   │       ├── Button.tsx              # Primary action trigger
 │   │   │       ├── ChatMessage.tsx         # Single chat turn with citations
-│   │   │       ├── CitationChip.tsx        # Numbered source citation badge
+│   │   │       ├── CitationChip.tsx        # Numbered source citation badge (focus-trapped expansion panel)
 │   │   │       ├── CitationMarker.tsx      # Inline citation superscript
+│   │   │       ├── ColHeader.tsx           # Sortable table column header (Documents page)
 │   │   │       ├── ConfidenceBar.tsx       # Horizontal confidence bar
+│   │   │       ├── DeleteModal.tsx         # Document delete confirmation modal
+│   │   │       ├── DocFilterPanel.tsx      # Chat page source-document filter sidebar
+│   │   │       ├── DocumentCard.tsx        # Documents page grid card
 │   │   │       ├── DocumentRelationMap.tsx # Force-directed SVG similarity graph
 │   │   │       ├── EmptyState.tsx          # Centered icon + message + action
+│   │   │       ├── ExpandedRow.tsx         # Documents page table-view expanded row (chunk preview + tags)
 │   │   │       ├── FileDropzone.tsx        # Drag-and-drop upload zone
 │   │   │       ├── FilingReport.tsx        # Chunk quality report card
 │   │   │       ├── IndexCard.tsx           # "Physical index card" citation preview
 │   │   │       ├── Input.tsx               # Labeled text input
 │   │   │       ├── LoadingSpinner.tsx      # Indeterminate progress bar
+│   │   │       ├── MobileSourceTopBar.tsx  # Mobile horizontal source bar (Chat page)
+│   │   │       ├── MobileSourcesDrawer.tsx # Mobile off-canvas source filter + history drawer
 │   │   │       ├── Modal.tsx               # Focus-trapped dialog
 │   │   │       ├── OnboardingFlow.tsx      # 3-step empty-KB onboarding
-│   │   │       ├── QueryHistoryPanel.tsx   # Collapsible query history sidebar
+│   │   │       ├── QueryHistoryPanel.tsx   # Collapsible query history sidebar (localStorage + backend search)
 │   │   │       ├── ReQueryButtons.tsx      # Re-query variant buttons
 │   │   │       ├── RelevanceTimeline.tsx   # Bar chart of chunk relevance scores
 │   │   │       ├── Select.tsx              # Styled native select
 │   │   │       ├── SourcePanel.tsx         # Split-screen source documents panel
+│   │   │       ├── StatusBar.tsx           # Chat page streaming-phase status pill
 │   │   │       ├── StreamingCursor.tsx     # Blinking cursor for streaming text
+│   │   │       ├── TagEditor.tsx           # Inline document tag chip editor
 │   │   │       ├── Toast.tsx              # Sticky-note notification
 │   │   │       └── useToast.ts            # Toast hook
 │   │   ├── hooks/
-│   │   │   ├── useSSE.ts                  # SSE connection with exponential backoff
+│   │   │   ├── useSSE.ts                  # SSE connection with exponential backoff + Zod payload validation
 │   │   │   ├── useQueryHistory.ts         # localStorage query history management
 │   │   │   ├── useCitationHighlight.ts    # Bidirectional citation highlighting
 │   │   │   ├── useKeyboardShortcuts.ts    # Global keyboard shortcut handler
 │   │   │   ├── useMobileBreakpoint.ts     # Responsive breakpoint detection
+│   │   │   ├── useFocusTrap.ts            # Shared focus-trap logic (Modal, drawers, citation panel)
 │   │   │   └── useFaviconState.ts         # Dynamic favicon based on upload state
 │   │   ├── stores/
-│   │   │   └── ragStore.ts               # Zustand store — documents, upload, chat, history
+│   │   │   └── ragStore.ts               # Zustand store — documents, upload, chat, history, tags
 │   │   ├── contexts/
 │   │   │   ├── ToastContext.tsx           # Toast notification provider
 │   │   │   └── ChatLayoutContext.tsx      # Split-screen layout state provider
 │   │   ├── services/
-│   │   │   └── api.ts                    # fetch-based backend client
+│   │   │   └── api.ts                    # fetch-based backend client (Zod-validated upload response)
 │   │   ├── utils/
 │   │   │   ├── formatAnswerMarkdown.ts   # Format answer text as clean Markdown
 │   │   │   ├── exportConversation.ts     # Export full conversation as Markdown file
 │   │   │   ├── parseCitationText.tsx     # Parse citation markers in LLM output
 │   │   │   ├── calculateConfidence.ts    # Compute average similarity confidence
+│   │   │   ├── chatCitations.ts          # Store Citation → ChatCitation shape conversion
+│   │   │   ├── documentFormatters.ts     # Documents page formatting helpers (bytes, dates, status)
 │   │   │   ├── queryHistory.ts           # localStorage CRUD for query history
 │   │   │   ├── estimateETA.ts            # Processing time estimation
 │   │   │   ├── timeAgo.ts               # Relative timestamp formatting
@@ -329,6 +357,9 @@ Vite only reads `frontend/.env.local`.
 | `CLERK_SECRET_KEY` | Yes | — | Clerk Dashboard → API Keys (starts with `sk_`) — verifies user JWTs server-side |
 | `CLERK_PUBLISHABLE_KEY` | Yes | — | Clerk Dashboard → API Keys (starts with `pk_`) |
 | `LOG_LEVEL` | No | `info` | `error` \| `warn` \| `info` \| `debug` |
+| `QUERY_REWRITE_ENABLED` | No | `false` | Extra Groq call per query to rewrite the question into a passage-like statement before embedding (HyDE-lite) |
+| `CROSS_ENCODER_ENABLED` | No | `true` | Local re-ranking of retrieved chunks (query-term overlap blended with similarity) before generation — no external API call |
+| `ANSWER_VALIDATION_ENABLED` | No | `false` | Extra Groq call after each answer to fact-check it against retrieved chunks, for a later confidence badge — does not alter the response already shown to the user |
 
 ### Frontend — `frontend/.env.local`
 
@@ -411,10 +442,11 @@ All services used are on permanently free tiers.
 - **Database access** — parameterized queries only, RLS enabled on all tables
 - **Admin auth** — `crypto.timingSafeEqual` for secret comparison
 - **User authentication** — Clerk JWT verification (Google OAuth) on `/api/upload`, `/api/documents`, and `/api/query`; every document and query is scoped to its owning user
+- **Prompt injection filtering** — query text is classified for injection risk before validation; high-risk queries are rejected, medium-risk queries are sanitized in place, and the filter fails open (never blocks legitimate traffic on an internal error)
+- **Audit logging** — document upload, document delete, and query submission are persisted to a durable `audit_logs` table, not just the application log
 
 **Deferred:**
-- No prompt-injection filtering
-- No malware/AV scanning
+- No AV/malware scanning of uploaded file *content* (only magic-byte and zip-bomb checks — the prompt-injection filtering above covers query text, not file contents)
 
 ---
 
@@ -430,12 +462,11 @@ All services used are on permanently free tiers.
 ## Known Limitations
 
 - `GET /api/query/stream` cannot carry an Authorization header (EventSource limitation) — it relies on a short-lived, single-use `queryId` capability instead of a fresh JWT check (see [FEATURES.md](./FEATURES.md) §9.3)
-- HuggingFace free tier: 1,000 req/day (exhausted by ~20 documents)
-- Document similarity map scales as O(n²) — practical limit ~10 documents
+- HuggingFace free tier: 1,000 req/day (query embeddings are cached to reduce repeat calls — see FEATURES.md §3.1c — but document ingestion still consumes real quota)
+- Relation map similarity computation is hard-capped at 150 ready documents (fails fast with a clear message rather than a slow/degraded response) — no approximate-nearest-neighbor search yet
 - In-memory query store (`queryId` map) — lost on backend restart
-- No prompt-injection filtering on query text
-- No malware/AV scanning of uploaded files
-- Chat.tsx (808 lines) and Documents.tsx (743 lines) need refactoring
+- No AV/malware scanning of uploaded file *content* — magic-byte and zip-bomb checks only (query *text* prompt-injection filtering is implemented — see Security above)
+- No working dark mode — the toggle scaffolding exists but the color system isn't yet CSS-variable-based (see FEATURES.md Known Issues)
 
 ---
 

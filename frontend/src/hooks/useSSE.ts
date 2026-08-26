@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { z } from 'zod';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -20,6 +21,72 @@ export type SSEEventType = 'searching' | 'found' | 'generating' | 'token' | 'com
 export interface SSEEvent {
   type: SSEEventType;
   data: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
+// Event payload schemas
+// ---------------------------------------------------------------------------
+
+/**
+ * Matches the backend's SourceCitation shape (backend/src/types/index.ts) as
+ * carried in 'found' (`chunks`) and 'complete' (`citations`) event payloads.
+ * Every field is validated but consumers only ever narrow with `.optional()`
+ * downstream reads, so a single malformed citation in an array is dropped
+ * rather than invalidating the whole event (see `safeParseCitationArray`).
+ */
+const citationSchema = z.object({
+  documentId: z.string(),
+  filename: z.string(),
+  chunkId: z.string(),
+  similarity: z.number(),
+  excerpt: z.string(),
+});
+
+const sseDataSchemas = {
+  searching: z.object({}).passthrough(),
+  found: z.object({ chunks: z.array(z.unknown()).optional() }).passthrough(),
+  generating: z.object({}).passthrough(),
+  token: z.object({ content: z.string().optional() }).passthrough(),
+  complete: z
+    .object({
+      citations: z.array(z.unknown()).optional(),
+      queryLogId: z.string().optional(),
+    })
+    .passthrough(),
+  error: z.object({ message: z.string().optional() }).passthrough(),
+} as const satisfies Record<SSEEventType, z.ZodTypeAny>;
+
+/**
+ * Validates a raw parsed SSE payload against the schema for its event type.
+ * Never throws: a payload that fails the top-level shape check (not just an
+ * individual optional field) falls back to an empty object rather than
+ * blocking the event entirely — `Chat.tsx`'s per-field `typeof`/`Array.isArray`
+ * guards already tolerate missing data, so this is defense in depth at the
+ * parse boundary, not a hard gate that could freeze the whole stream on one
+ * malformed event.
+ * @param type - SSE event type, selects which schema to validate against
+ * @param data - Parsed JSON payload from the event
+ * @returns The validated data, or an empty object if it didn't match the expected shape
+ */
+function validateSSEData(type: SSEEventType, data: unknown): Record<string, unknown> {
+  const schema = sseDataSchemas[type];
+  const result = schema.safeParse(data);
+  return result.success ? result.data : {};
+}
+
+/**
+ * Filters an array of unknown items down to those matching the citation
+ * shape, dropping malformed entries individually rather than discarding the
+ * whole array over one bad element.
+ * @param items - Raw array from a 'found'/'complete' event's `chunks`/`citations` field
+ * @returns Only the items that validate as citations
+ */
+export function safeParseCitations(items: unknown): Array<z.infer<typeof citationSchema>> {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((item) => citationSchema.safeParse(item))
+    .filter((r): r is { success: true; data: z.infer<typeof citationSchema> } => r.success)
+    .map((r) => r.data);
 }
 
 /** Callbacks the consumer provides to handle stream events. */
@@ -112,7 +179,14 @@ export function useSSE(url: string | null, options: SSEOptions): SSEControls {
       };
 
       // Handle each named event type the server emits
-      const eventTypes: SSEEventType[] = ['searching', 'found', 'generating', 'token', 'complete', 'error'];
+      const eventTypes: SSEEventType[] = [
+        'searching',
+        'found',
+        'generating',
+        'token',
+        'complete',
+        'error',
+      ];
 
       eventTypes.forEach((type) => {
         es.addEventListener(type, (ev: MessageEvent) => {
@@ -120,7 +194,8 @@ export function useSSE(url: string | null, options: SSEOptions): SSEControls {
           if (esRef.current !== es) return;
           let data: Record<string, unknown> = {};
           try {
-            data = JSON.parse(ev.data as string) as Record<string, unknown>;
+            const parsed: unknown = JSON.parse(ev.data as string);
+            data = validateSSEData(type, parsed);
           } catch {
             // Malformed JSON — pass empty data object
           }
@@ -168,9 +243,7 @@ export function useSSE(url: string | null, options: SSEOptions): SSEControls {
           retryRef.current += 1;
           retryTimerRef.current = setTimeout(connect, delay);
         } else {
-          onErrorRef.current(
-            new Error(`SSE connection failed after ${maxRetries} attempts`),
-          );
+          onErrorRef.current(new Error(`SSE connection failed after ${maxRetries} attempts`));
         }
       };
     };

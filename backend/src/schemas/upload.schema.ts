@@ -15,6 +15,7 @@ export const SUPPORTED_MIME_TYPES = [
   'application/pdf',
   'text/plain',
   'text/markdown',
+  'text/html',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ] as const;
 
@@ -23,7 +24,7 @@ export const UploadFileSchema = z.object({
   originalname: z.string().max(255, 'Filename must be at most 255 characters'),
   mimetype: z.enum(SUPPORTED_MIME_TYPES, {
     errorMap: () => ({
-      message: `Unsupported file type. Allowed: PDF, DOCX, TXT, MD`,
+      message: `Unsupported file type. Allowed: PDF, DOCX, TXT, MD, HTML`,
     }),
   }),
   size: z.number().max(MAX_FILE_SIZE, `File must not exceed ${MAX_FILE_SIZE / 1024 / 1024} MB`),

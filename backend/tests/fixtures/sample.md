@@ -1,4 +1,4 @@
-# RAG Knowledge Base
+# Lumina
 
 ## Overview
 

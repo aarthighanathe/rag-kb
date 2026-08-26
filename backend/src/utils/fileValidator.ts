@@ -25,6 +25,7 @@ const MAGIC_BYTES: Readonly<Record<FileType, ReadonlyArray<number> | null>> = {
   docx: [0x50, 0x4b, 0x03, 0x04], // PK (ZIP — DOCX is a ZIP archive)
   txt: null,
   md: null,
+  html: null,
 };
 
 /** File extensions that are inherently executable and signal a double-extension attack. */
@@ -50,6 +51,8 @@ const EXTENSION_TO_FILE_TYPE: Readonly<Record<string, FileType>> = {
   '.txt': 'txt',
   '.md': 'md',
   '.markdown': 'md',
+  '.html': 'html',
+  '.htm': 'html',
 };
 
 /**
@@ -63,6 +66,7 @@ export const FILE_TYPE_TO_MIME: Readonly<Record<FileType, SupportedMimeType>> = 
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   txt: 'text/plain',
   md: 'text/markdown',
+  html: 'text/html',
 };
 
 /** Inverse of FILE_TYPE_TO_MIME — derived, not hand-maintained, so it can't drift. */
@@ -238,7 +242,7 @@ function hasEmbeddedScript(filename: string): boolean {
 
 /**
  * Validates a file buffer by inspecting magic bytes for the given FileType.
- * For text types (txt, md) validates UTF-8 encoding instead.
+ * For text types (txt, md, html) validates UTF-8 encoding instead.
  * @param buffer - Raw file buffer
  * @param fileType - Expected file type
  * @returns True if the buffer content matches the expected file type
@@ -299,15 +303,6 @@ export function sanitizeFileName(name: string): string {
   return base.replace(/[^\w.\-() ]/gu, '_');
 }
 
-/**
- * Runs the full server-side file validation pipeline:
- * size check → filename check → extension detection → magic bytes.
- * @param buffer - Raw file buffer from multer
- * @param originalName - Original filename provided by the client
- * @param maxMB - Maximum allowed file size in megabytes
- * @returns Validated file metadata
- * @throws {FileValidationError} On any validation failure
- */
 // ─── Private sub-validators (extracted to keep validateFile complexity ≤ 10) ──
 
 /**
@@ -346,7 +341,7 @@ function resolveFileType(originalName: string): FileType {
   const fileType = EXTENSION_TO_FILE_TYPE[ext];
   if (fileType === undefined) {
     throw new FileValidationError(
-      `Unsupported file extension "${ext}". Allowed: .pdf, .docx, .txt, .md`,
+      `Unsupported file extension "${ext}". Allowed: .pdf, .docx, .txt, .md, .html, .htm`,
       FileValidationErrorCode.UNSUPPORTED_TYPE,
     );
   }

@@ -10,7 +10,7 @@ import supertest from 'supertest';
 import http from 'http';
 import type { Application } from 'express';
 import type { RetrievedChunk } from '../../src/types/index.js';
-import { authedRequest, collectSSEEvents, OTHER_TEST_USER_ID } from './helpers.js';
+import { authedRequest, collectSSEEvents, OTHER_TEST_USER_ID, TEST_USER_ID } from './helpers.js';
 
 // ── Service mocks ─────────────────────────────────────────────────────────────
 
@@ -20,17 +20,31 @@ vi.mock('@services/embedder', () => ({
 
 vi.mock('@services/vectorStore', () => ({
   similaritySearch: vi.fn(),
+  hybridSearch: vi.fn(),
   createDocument: vi.fn(),
   listDocuments: vi.fn(),
   getDocument: vi.fn(),
   deleteDocument: vi.fn(),
   logQuery: vi.fn().mockResolvedValue('query-log-uuid-1'),
   setQueryFeedback: vi.fn(),
+  setQueryValidation: vi.fn().mockResolvedValue(undefined),
+  insertAuditLog: vi.fn().mockResolvedValue(undefined),
+  listQueryLogs: vi.fn(),
+}));
+
+vi.mock('@services/answerValidator', () => ({
+  validateAnswer: vi.fn().mockResolvedValue({ isValid: true, confidence: 1, issues: [], suggestions: [], durationMs: 0 }),
 }));
 
 vi.mock('@services/llm', () => ({
   streamAnswer: vi.fn(),
   extractCitations: vi.fn(),
+  // Passes citations through unchanged — the actual filtering behaviour
+  // (keeping only [N]-cited entries, dropping out-of-range numbers) is
+  // covered by dedicated unit tests in tests/unit/llm.test.ts. These
+  // integration tests only care that *some* citations array reaches the
+  // `complete` event, not the filtering logic itself.
+  filterCitationsByModelOutput: vi.fn().mockImplementation((citations: unknown[]) => citations),
   setSseHeaders: vi.fn().mockImplementation((res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -53,6 +67,7 @@ const MOCK_CHUNK: RetrievedChunk = {
   similarity: 0.92,
   metadata: { char_start: 0, char_end: 47 },
   filename: 'report.pdf',
+  source: 'vector',
 };
 
 const MOCK_CITATION = {
@@ -129,6 +144,85 @@ describe('POST /api/query', () => {
   });
 });
 
+// ── GET /api/query/history ────────────────────────────────────────────────────
+
+describe('GET /api/query/history', () => {
+  it('returns 200 with the mapped history list and pagination meta', async () => {
+    const { listQueryLogs } = await import('@services/vectorStore') as unknown as {
+      listQueryLogs: ReturnType<typeof vi.fn>;
+    };
+    listQueryLogs.mockResolvedValue({
+      data: [
+        {
+          id: 'log-1',
+          query_text: 'What is the refund policy?',
+          response_preview: 'Refunds within 14 days...',
+          latency_ms: 1200,
+          feedback: 'helpful',
+          validation_confidence: 0.9,
+          created_at: '2026-06-16T00:00:00.000Z',
+        },
+      ],
+      total: 1,
+    });
+
+    const res = await authedRequest(app).get('/api/query/history').expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toEqual([
+      {
+        id: 'log-1',
+        queryText: 'What is the refund policy?',
+        responsePreview: 'Refunds within 14 days...',
+        latencyMs: 1200,
+        feedback: 'helpful',
+        validationConfidence: 0.9,
+        createdAt: '2026-06-16T00:00:00.000Z',
+      },
+    ]);
+    expect(res.body.meta).toMatchObject({ page: 1, total: 1 });
+  });
+
+  it('passes the search query param through to the service', async () => {
+    const { listQueryLogs } = await import('@services/vectorStore') as unknown as {
+      listQueryLogs: ReturnType<typeof vi.fn>;
+    };
+    listQueryLogs.mockResolvedValue({ data: [], total: 0 });
+
+    await authedRequest(app).get('/api/query/history?search=refund').expect(200);
+
+    expect(listQueryLogs).toHaveBeenCalledWith(TEST_USER_ID, 1, 20, 'refund');
+  });
+
+  it('passes page and limit query params through to the service', async () => {
+    const { listQueryLogs } = await import('@services/vectorStore') as unknown as {
+      listQueryLogs: ReturnType<typeof vi.fn>;
+    };
+    listQueryLogs.mockResolvedValue({ data: [], total: 0 });
+
+    await authedRequest(app).get('/api/query/history?page=2&limit=5').expect(200);
+
+    expect(listQueryLogs).toHaveBeenCalledWith(TEST_USER_ID, 2, 5, undefined);
+  });
+
+  it('returns 422 when limit exceeds the maximum of 50', async () => {
+    const res = await authedRequest(app).get('/api/query/history?limit=51').expect(422);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('returns 422 when search exceeds 200 characters', async () => {
+    const res = await authedRequest(app)
+      .get(`/api/query/history?search=${'a'.repeat(201)}`)
+      .expect(422);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('requires authentication', async () => {
+    const res = await supertest(app).get('/api/query/history').expect(401);
+    expect(res.body.success).toBe(false);
+  });
+});
+
 // ── GET /api/query/stream ──────────────────────────────────────────────────────
 
 describe('GET /api/query/stream', () => {
@@ -164,15 +258,15 @@ describe('GET /api/query/stream', () => {
   });
 
   it('establishes SSE connection and fires events in correct order', async () => {
-    const { similaritySearch } = await import('@services/vectorStore') as {
-      similaritySearch: ReturnType<typeof vi.fn>;
+    const { hybridSearch } = await import('@services/vectorStore') as unknown as {
+      hybridSearch: ReturnType<typeof vi.fn>;
     };
-    const { streamAnswer, extractCitations } = await import('@services/llm') as {
+    const { streamAnswer, extractCitations } = await import('@services/llm') as unknown as {
       streamAnswer: ReturnType<typeof vi.fn>;
       extractCitations: ReturnType<typeof vi.fn>;
     };
 
-    similaritySearch.mockResolvedValue([MOCK_CHUNK]);
+    hybridSearch.mockResolvedValue([MOCK_CHUNK]);
     extractCitations.mockReturnValue([MOCK_CITATION]);
     streamAnswer.mockImplementation(
       async (
@@ -212,6 +306,55 @@ describe('GET /api/query/stream', () => {
     expect(eventTypes[eventTypes.length - 1]).toBe('complete');
   });
 
+  // Regression: relativeFloorGap was accepted by QueryRequestSchema and
+  // documented as the way to disable the relative-similarity floor
+  // (0 or negative), but the stream handler's similaritySearch call stopped
+  // at similarityThreshold — the 6th argument was never passed, so the value
+  // was silently dropped and the SQL function's default floor (0.15) applied
+  // to every query regardless of what the caller requested.
+  it('threads relativeFloorGap from the request through to hybridSearch', async () => {
+    const { hybridSearch } = await import('@services/vectorStore') as unknown as {
+      hybridSearch: ReturnType<typeof vi.fn>;
+    };
+    const { streamAnswer, extractCitations } = await import('@services/llm') as unknown as {
+      streamAnswer: ReturnType<typeof vi.fn>;
+      extractCitations: ReturnType<typeof vi.fn>;
+    };
+
+    hybridSearch.mockResolvedValue([MOCK_CHUNK]);
+    extractCitations.mockReturnValue([MOCK_CITATION]);
+    streamAnswer.mockImplementation(
+      async (
+        _ctx: unknown,
+        _history: unknown,
+        opts: { onChunk: (t: string) => void; onComplete: () => void },
+      ) => {
+        opts.onChunk('An answer.');
+        opts.onComplete();
+      },
+    );
+
+    const initRes = await authedRequest(app)
+      .post('/api/query')
+      .send({ query: 'What is the main finding?', relativeFloorGap: 0 })
+      .expect(200);
+
+    const { queryId } = initRes.body.data as { queryId: string };
+
+    await supertest(app).get(`/api/query/stream?queryId=${queryId}`).expect(200);
+
+    expect(hybridSearch).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.any(String),
+      expect.any(Number),
+      expect.any(String),
+      undefined,
+      expect.any(Number),
+      0,
+      undefined,
+    );
+  });
+
   // Regression: consumePendingQuery used to delete the entry on the FIRST GET,
   // so useSSE.ts's exponential-backoff reconnect (targeting the same queryId
   // after a genuinely dropped connection) could only ever hit a 404 — the
@@ -220,10 +363,10 @@ describe('GET /api/query/stream', () => {
   // destroyed before the pipeline reaches a terminal outcome), then reopens
   // the same queryId and expects a fresh, successful stream — not a 404.
   it('lets a reconnect after a genuine mid-stream drop restart the query instead of 404ing', async () => {
-    const { similaritySearch } = await import('@services/vectorStore') as {
-      similaritySearch: ReturnType<typeof vi.fn>;
+    const { hybridSearch } = await import('@services/vectorStore') as unknown as {
+      hybridSearch: ReturnType<typeof vi.fn>;
     };
-    const { streamAnswer, extractCitations } = await import('@services/llm') as {
+    const { streamAnswer, extractCitations } = await import('@services/llm') as unknown as {
       streamAnswer: ReturnType<typeof vi.fn>;
       extractCitations: ReturnType<typeof vi.fn>;
     };
@@ -249,14 +392,14 @@ describe('GET /api/query/stream', () => {
         .expect(200);
       const { queryId } = initRes.body.data as { queryId: string };
 
-      // similaritySearch resolves only after the client socket has already
+      // hybridSearch resolves only after the client socket has already
       // been destroyed, so the first attempt unwinds via the isConnected()
       // guard without ever reaching a terminal emit.
       let resolveSearch: (chunks: RetrievedChunk[]) => void;
       const searchPromise = new Promise<RetrievedChunk[]>((resolve) => {
         resolveSearch = resolve;
       });
-      similaritySearch.mockReturnValueOnce(searchPromise);
+      hybridSearch.mockReturnValueOnce(searchPromise);
 
       await new Promise<void>((resolveTest) => {
         const req = http.request(
@@ -287,7 +430,7 @@ describe('GET /api/query/stream', () => {
 
       // Second attempt: same queryId, fresh (non-once) mock — must succeed,
       // not 404, and must run the pipeline again (not resume a buffer).
-      similaritySearch.mockResolvedValue([MOCK_CHUNK]);
+      hybridSearch.mockResolvedValue([MOCK_CHUNK]);
       const secondRes = await supertest(app)
         .get(`/api/query/stream?queryId=${queryId}`)
         .expect(200);
@@ -300,14 +443,14 @@ describe('GET /api/query/stream', () => {
   });
 
   it('sends complete event with empty citations when knowledge base has no matches', async () => {
-    const { similaritySearch } = await import('@services/vectorStore') as {
-      similaritySearch: ReturnType<typeof vi.fn>;
+    const { hybridSearch } = await import('@services/vectorStore') as unknown as {
+      hybridSearch: ReturnType<typeof vi.fn>;
     };
-    const { extractCitations } = await import('@services/llm') as {
+    const { extractCitations } = await import('@services/llm') as unknown as {
       extractCitations: ReturnType<typeof vi.fn>;
     };
 
-    similaritySearch.mockResolvedValue([]);
+    hybridSearch.mockResolvedValue([]);
     extractCitations.mockReturnValue([]);
 
     const initRes = await authedRequest(app)
@@ -330,14 +473,14 @@ describe('GET /api/query/stream', () => {
   });
 
   it('sends an error SSE event when the LLM fails mid-stream', async () => {
-    const { similaritySearch } = await import('@services/vectorStore') as {
-      similaritySearch: ReturnType<typeof vi.fn>;
+    const { hybridSearch } = await import('@services/vectorStore') as unknown as {
+      hybridSearch: ReturnType<typeof vi.fn>;
     };
-    const { streamAnswer } = await import('@services/llm') as {
+    const { streamAnswer } = await import('@services/llm') as unknown as {
       streamAnswer: ReturnType<typeof vi.fn>;
     };
 
-    similaritySearch.mockResolvedValue([MOCK_CHUNK]);
+    hybridSearch.mockResolvedValue([MOCK_CHUNK]);
     streamAnswer.mockImplementation(
       async (
         _ctx: unknown,
@@ -374,15 +517,15 @@ describe('GET /api/query/stream', () => {
   });
 
   it('returns 200 with complete event and empty citations when no chunks match', async () => {
-    const { similaritySearch } = await import('@services/vectorStore') as {
-      similaritySearch: ReturnType<typeof vi.fn>;
+    const { hybridSearch } = await import('@services/vectorStore') as unknown as {
+      hybridSearch: ReturnType<typeof vi.fn>;
     };
-    const { streamAnswer, extractCitations } = await import('@services/llm') as {
+    const { streamAnswer, extractCitations } = await import('@services/llm') as unknown as {
       streamAnswer: ReturnType<typeof vi.fn>;
       extractCitations: ReturnType<typeof vi.fn>;
     };
 
-    similaritySearch.mockResolvedValue([]);
+    hybridSearch.mockResolvedValue([]);
     extractCitations.mockReturnValue([]);
     streamAnswer.mockImplementation(
       async (
@@ -413,10 +556,10 @@ describe('GET /api/query/stream', () => {
   });
 
   it('includes RateLimit headers in the stream response', async () => {
-    const { similaritySearch } = await import('@services/vectorStore') as {
-      similaritySearch: ReturnType<typeof vi.fn>;
+    const { hybridSearch } = await import('@services/vectorStore') as unknown as {
+      hybridSearch: ReturnType<typeof vi.fn>;
     };
-    similaritySearch.mockResolvedValue([]);
+    hybridSearch.mockResolvedValue([]);
 
     const initRes = await authedRequest(app)
       .post('/api/query')
@@ -436,10 +579,10 @@ describe('GET /api/query/stream', () => {
   });
 
   it('does not invoke the LLM when the client disconnects between vector search and generation', async () => {
-    const { similaritySearch } = await import('@services/vectorStore') as {
-      similaritySearch: ReturnType<typeof vi.fn>;
+    const { hybridSearch } = await import('@services/vectorStore') as unknown as {
+      hybridSearch: ReturnType<typeof vi.fn>;
     };
-    const { streamAnswer, extractCitations } = await import('@services/llm') as {
+    const { streamAnswer, extractCitations } = await import('@services/llm') as unknown as {
       streamAnswer: ReturnType<typeof vi.fn>;
       extractCitations: ReturnType<typeof vi.fn>;
     };
@@ -468,14 +611,14 @@ describe('GET /api/query/stream', () => {
         .expect(200);
       const { queryId } = initRes.body.data as { queryId: string };
 
-      // similaritySearch resolves only once the client request has already
+      // hybridSearch resolves only once the client request has already
       // been destroyed, simulating a disconnect that lands between vector
       // search finishing and the LLM call starting.
       let resolveSearch: (chunks: RetrievedChunk[]) => void;
       const searchPromise = new Promise<RetrievedChunk[]>((resolve) => {
         resolveSearch = resolve;
       });
-      similaritySearch.mockReturnValue(searchPromise);
+      hybridSearch.mockReturnValue(searchPromise);
 
       await new Promise<void>((resolveTest, rejectTest) => {
         const req = http.request(
@@ -498,7 +641,7 @@ describe('GET /api/query/stream', () => {
         req.end();
 
         // Give the server enough time to run through auth/rate-limit
-        // middleware and reach the similaritySearch await point, then
+        // middleware and reach the hybridSearch await point, then
         // destroy the client connection and resolve the search.
         setTimeout(() => {
           req.destroy();
@@ -550,10 +693,10 @@ describe('POST /api/query authentication', () => {
 
 describe('GET /api/query/stream requires no separate Authorization header', () => {
   it('serves the stream for a valid queryId with no Authorization header at all', async () => {
-    const { similaritySearch } = await import('@services/vectorStore') as {
-      similaritySearch: ReturnType<typeof vi.fn>;
+    const { hybridSearch } = await import('@services/vectorStore') as unknown as {
+      hybridSearch: ReturnType<typeof vi.fn>;
     };
-    similaritySearch.mockResolvedValue([]);
+    hybridSearch.mockResolvedValue([]);
 
     // POST is authenticated — the resulting queryId is the capability that lets
     // the unauthenticated (EventSource-compatible) GET /stream proceed.
@@ -581,7 +724,7 @@ describe('POST /api/query/:queryId/feedback', () => {
   const FEEDBACK_QUERY_ID = '550e8400-e29b-41d4-a716-446655440042';
 
   it('returns 200 and records helpful feedback for a valid queryId', async () => {
-    const { setQueryFeedback } = await import('@services/vectorStore') as {
+    const { setQueryFeedback } = await import('@services/vectorStore') as unknown as {
       setQueryFeedback: ReturnType<typeof vi.fn>;
     };
     setQueryFeedback.mockResolvedValue(undefined);
@@ -639,7 +782,7 @@ describe('POST /api/query/:queryId/feedback', () => {
   // ── Ownership (IDOR prevention) ──────────────────────────────────────────
 
   it('returns 404, not 403, when the query exists but belongs to another user', async () => {
-    const { setQueryFeedback } = await import('@services/vectorStore') as {
+    const { setQueryFeedback } = await import('@services/vectorStore') as unknown as {
       setQueryFeedback: ReturnType<typeof vi.fn>;
     };
     const { NotFoundError } = await import('../../src/types/index.js');
@@ -662,7 +805,7 @@ describe('POST /api/query/:queryId/feedback', () => {
   });
 
   it('returns 404 for a queryId that never existed', async () => {
-    const { setQueryFeedback } = await import('@services/vectorStore') as {
+    const { setQueryFeedback } = await import('@services/vectorStore') as unknown as {
       setQueryFeedback: ReturnType<typeof vi.fn>;
     };
     const { NotFoundError } = await import('../../src/types/index.js');
@@ -679,7 +822,7 @@ describe('POST /api/query/:queryId/feedback', () => {
   // ── Idempotency ───────────────────────────────────────────────────────────
 
   it('resubmitting feedback for the same query updates it rather than erroring', async () => {
-    const { setQueryFeedback } = await import('@services/vectorStore') as {
+    const { setQueryFeedback } = await import('@services/vectorStore') as unknown as {
       setQueryFeedback: ReturnType<typeof vi.fn>;
     };
     setQueryFeedback.mockResolvedValue(undefined);

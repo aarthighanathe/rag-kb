@@ -10,7 +10,7 @@
  */
 
 import { type Request, type Response, type NextFunction, type RequestHandler } from 'express';
-import { type ZodSchema } from 'zod';
+import { type ZodType, type ZodTypeDef } from 'zod';
 import { logger } from '../utils/logger.js';
 
 type RequestTarget = 'body' | 'params' | 'query';
@@ -19,11 +19,18 @@ type RequestTarget = 'body' | 'params' | 'query';
  * Creates an Express middleware that validates the specified part of a request against a Zod schema.
  * On success, the validated (and coerced/defaulted) data replaces the original target on the request.
  * On failure, calls next(ZodError) so the global error handler formats it as 422 with field details.
- * @param schema - Zod schema to validate against
+ * @param schema - Zod schema to validate against. The Input generic is left as
+ *   `unknown` (not constrained to equal T) so schemas that transform the raw
+ *   request shape into a different output shape (e.g. a comma-separated query
+ *   string parsed into a string[]) type-check here — Zod already re-validates
+ *   the actual input at runtime via safeParse regardless of what TS infers.
  * @param target - Part of the request to validate: 'body', 'params', or 'query'
  * @returns Express middleware function
  */
-export function validate<T>(schema: ZodSchema<T>, target: RequestTarget = 'body'): RequestHandler {
+export function validate<T>(
+  schema: ZodType<T, ZodTypeDef, unknown>,
+  target: RequestTarget = 'body',
+): RequestHandler {
   return (req: Request, _res: Response, next: NextFunction): void => {
     const result = schema.safeParse(req[target]);
 
@@ -64,7 +71,7 @@ export function validate<T>(schema: ZodSchema<T>, target: RequestTarget = 'body'
  * @param schema - Zod schema to validate against
  * @returns Express middleware function
  */
-export function validateBody<T>(schema: ZodSchema<T>): RequestHandler {
+export function validateBody<T>(schema: ZodType<T, ZodTypeDef, unknown>): RequestHandler {
   return validate(schema, 'body');
 }
 
@@ -74,7 +81,7 @@ export function validateBody<T>(schema: ZodSchema<T>): RequestHandler {
  * @param schema - Zod schema to validate against
  * @returns Express middleware function
  */
-export function validateQuery<T>(schema: ZodSchema<T>): RequestHandler {
+export function validateQuery<T>(schema: ZodType<T, ZodTypeDef, unknown>): RequestHandler {
   return validate(schema, 'query');
 }
 
@@ -84,6 +91,6 @@ export function validateQuery<T>(schema: ZodSchema<T>): RequestHandler {
  * @param schema - Zod schema to validate against
  * @returns Express middleware function
  */
-export function validateParams<T>(schema: ZodSchema<T>): RequestHandler {
+export function validateParams<T>(schema: ZodType<T, ZodTypeDef, unknown>): RequestHandler {
   return validate(schema, 'params');
 }

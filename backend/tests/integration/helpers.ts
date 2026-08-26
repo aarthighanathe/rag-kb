@@ -226,6 +226,7 @@ export function makeRetrievedChunk(overrides: Partial<RetrievedChunk> = {}): Ret
     similarity:        0.92,
     metadata:          { char_start: 0, char_end: 45 },
     filename:          'report.pdf',
+    source:            'vector',
     ...overrides,
   };
 }

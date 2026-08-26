@@ -1,7 +1,7 @@
 /**
  * @file AppHeader.tsx
  * @description Shared horizontal header for interior app routes (Upload / Chat / Documents).
- *   Dark ink.base (#1C1B19) bar, 50px tall. Left: BookOpen icon + "RAG KB" wordmark.
+ *   Dark ink.base (#1C1B19) bar, 50px tall. Left: BookOpen icon + "Lumina" wordmark.
  *   Vertical divider. Three tab links — inactive: ink.muted, active: stamp.red + 2px bottom bar.
  *   Mobile (<640px): icon-only with aria-label.
  * @updated 2026-06-23
@@ -20,9 +20,24 @@ interface TabDef {
 }
 
 const TABS: TabDef[] = [
-  { to: '/upload',    label: 'Upload',    ariaLabel: 'Upload',    icon: <Upload        size={14} aria-hidden="true" /> },
-  { to: '/chat',      label: 'Chat',      ariaLabel: 'Chat',      icon: <MessageSquare size={14} aria-hidden="true" /> },
-  { to: '/documents', label: 'Documents', ariaLabel: 'Documents', icon: <FolderOpen    size={14} aria-hidden="true" /> },
+  {
+    to: '/upload',
+    label: 'Upload',
+    ariaLabel: 'Upload',
+    icon: <Upload size={14} aria-hidden="true" />,
+  },
+  {
+    to: '/chat',
+    label: 'Chat',
+    ariaLabel: 'Chat',
+    icon: <MessageSquare size={14} aria-hidden="true" />,
+  },
+  {
+    to: '/documents',
+    label: 'Documents',
+    ariaLabel: 'Documents',
+    icon: <FolderOpen size={14} aria-hidden="true" />,
+  },
 ];
 
 /**
@@ -45,9 +60,9 @@ export function AppHeader(): React.JSX.Element {
 
       let next = index;
       if (e.key === 'ArrowRight') next = (index + 1) % tabs.length;
-      if (e.key === 'ArrowLeft')  next = (index - 1 + tabs.length) % tabs.length;
-      if (e.key === 'Home')       next = 0;
-      if (e.key === 'End')        next = tabs.length - 1;
+      if (e.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+      if (e.key === 'Home') next = 0;
+      if (e.key === 'End') next = tabs.length - 1;
 
       tabs[next]?.focus();
     },
@@ -68,7 +83,7 @@ export function AppHeader(): React.JSX.Element {
           /upload — clicking the logo there would otherwise appear to do nothing. */}
       <NavLink
         to="/upload"
-        aria-label="RAG KB — go to Upload"
+        aria-label="Lumina — go to Upload"
         className="flex items-center gap-2 px-4 sm:px-5 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset"
         style={{ focusVisibleOutlineColor: '#FF4D2E' } as React.CSSProperties}
       >
@@ -82,9 +97,9 @@ export function AppHeader(): React.JSX.Element {
             letterSpacing: '-0.01em',
           }}
         >
-          {/* Shorten to 'KB' on narrow mobile, full name on sm+ */}
-          <span className="hidden sm:inline">RAG KB</span>
-          <span className="inline sm:hidden">KB</span>
+          {/* Shorten to 'L' on narrow mobile, full name on sm+ */}
+          <span className="hidden sm:inline">Lumina</span>
+          <span className="inline sm:hidden">L</span>
         </span>
       </NavLink>
 
@@ -117,9 +132,7 @@ export function AppHeader(): React.JSX.Element {
                 'font-body whitespace-nowrap select-none',
                 'transition-colors min-w-[48px]',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ds-stamp',
-                isActive
-                  ? 'font-bold'
-                  : '',
+                isActive ? 'font-bold' : '',
               ].join(' ')
             }
             style={({ isActive }) => ({
@@ -132,9 +145,7 @@ export function AppHeader(): React.JSX.Element {
               <>
                 {/* aria-current must live on the element with role="tab" — we use a data attr approach
                     by adding it via the wrapper. NavLink v6 sets aria-current automatically. */}
-                <span style={{ color: isActive ? '#FF4D2E' : '#8A8578' }}>
-                  {tab.icon}
-                </span>
+                <span style={{ color: isActive ? '#FF4D2E' : '#8A8578' }}>{tab.icon}</span>
                 {/* Hide label text on mobile (≤768px), show on md+ */}
                 <span className="hidden md:inline">{tab.label}</span>
 

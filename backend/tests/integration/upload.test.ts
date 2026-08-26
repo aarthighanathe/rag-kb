@@ -17,6 +17,8 @@ vi.mock('@services/vectorStore', () => ({
   listDocuments: vi.fn(),
   getDocument: vi.fn(),
   deleteDocument: vi.fn().mockResolvedValue(undefined),
+  insertAuditLog: vi.fn().mockResolvedValue(undefined),
+  findDocumentByHash: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock('@queues/documentQueue', () => ({
@@ -91,6 +93,64 @@ describe('POST /api/upload', () => {
     });
   });
 
+  describe('duplicate detection', () => {
+    it('proceeds normally with no duplicateOf field when no hash match exists', async () => {
+      const { findDocumentByHash } = await import('@services/vectorStore') as unknown as {
+        findDocumentByHash: ReturnType<typeof vi.fn>;
+      };
+      findDocumentByHash.mockResolvedValue(null);
+
+      const res = await authedRequest(app)
+        .post('/api/upload')
+        .attach('files', PDF_BUFFER, { filename: 'report.pdf', contentType: 'application/pdf' })
+        .expect(200);
+
+      expect(res.body.data.documents[0].duplicateOf).toBeUndefined();
+    });
+
+    it('includes duplicateOf when the uploader already has a document with identical content', async () => {
+      const { findDocumentByHash } = await import('@services/vectorStore') as unknown as {
+        findDocumentByHash: ReturnType<typeof vi.fn>;
+      };
+      findDocumentByHash.mockResolvedValue({
+        id: 'existing-doc-id',
+        filename: 'original-report.pdf',
+        status: 'ready',
+        createdAt: '2026-06-16T00:00:00Z',
+      });
+
+      const res = await authedRequest(app)
+        .post('/api/upload')
+        .attach('files', PDF_BUFFER, { filename: 'report-copy.pdf', contentType: 'application/pdf' })
+        .expect(200);
+
+      expect(res.body.data.documents[0].duplicateOf).toEqual({
+        id: 'existing-doc-id',
+        filename: 'original-report.pdf',
+        status: 'ready',
+        createdAt: '2026-06-16T00:00:00Z',
+      });
+      // The upload still proceeds and creates a new document — duplicate
+      // detection is informational, never a block.
+      expect(res.body.data.documents[0].status).toBe('pending');
+    });
+
+    it('still succeeds when the duplicate lookup itself fails', async () => {
+      const { findDocumentByHash } = await import('@services/vectorStore') as unknown as {
+        findDocumentByHash: ReturnType<typeof vi.fn>;
+      };
+      findDocumentByHash.mockRejectedValue(new Error('DB timeout'));
+
+      const res = await authedRequest(app)
+        .post('/api/upload')
+        .attach('files', PDF_BUFFER, { filename: 'report.pdf', contentType: 'application/pdf' })
+        .expect(200);
+
+      expect(res.body.data.documents[0].duplicateOf).toBeUndefined();
+      expect(res.body.data.documents[0].status).toBe('pending');
+    });
+  });
+
   describe('error cases', () => {
     it('returns 413 when a file exceeds the 10 MB size limit', async () => {
       // Build a buffer > 10 MB so multer throws LIMIT_FILE_SIZE before route logic
@@ -112,11 +172,11 @@ describe('POST /api/upload', () => {
     });
 
     it('returns 400 when file MIME type is not allowed by the allow-list', async () => {
-      const htmlBuffer = Buffer.from('<html><body>not allowed</body></html>');
+      const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
       const res = await authedRequest(app)
         .post('/api/upload')
-        .attach('files', htmlBuffer, { filename: 'page.html', contentType: 'text/html' })
+        .attach('files', pngBuffer, { filename: 'image.png', contentType: 'image/png' })
         .expect(400);
 
       expect(res.body.success).toBe(false);
@@ -176,11 +236,11 @@ describe('POST /api/upload', () => {
 
   describe('error envelope shape', () => {
     it('returns consistent envelope on all failure paths', async () => {
-      const htmlBuffer = Buffer.from('<html><body>not allowed</body></html>');
+      const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
       const res = await authedRequest(app)
         .post('/api/upload')
-        .attach('files', htmlBuffer, { filename: 'page.html', contentType: 'text/html' })
+        .attach('files', pngBuffer, { filename: 'image.png', contentType: 'image/png' })
         .expect(400);
 
       expect(res.body).toMatchObject({
@@ -209,7 +269,7 @@ describe('POST /api/upload', () => {
 
   describe('service-layer failure handling', () => {
     it('returns 500 when Supabase createDocument throws an InternalError', async () => {
-      const { createDocument } = await import('@services/vectorStore') as {
+      const { createDocument } = await import('@services/vectorStore') as unknown as {
         createDocument: ReturnType<typeof vi.fn>;
       };
       const { InternalError } = await import('../../src/types/index.js');
@@ -225,10 +285,10 @@ describe('POST /api/upload', () => {
     });
 
     it('rolls back the staged file when createDocument fails', async () => {
-      const { createDocument } = await import('@services/vectorStore') as {
+      const { createDocument } = await import('@services/vectorStore') as unknown as {
         createDocument: ReturnType<typeof vi.fn>;
       };
-      const { removeFile } = await import('@services/storage') as { removeFile: ReturnType<typeof vi.fn> };
+      const { removeFile } = await import('@services/storage') as unknown as { removeFile: ReturnType<typeof vi.fn> };
       const { InternalError } = await import('../../src/types/index.js');
       createDocument.mockRejectedValueOnce(new InternalError('DB connection refused'));
 
@@ -241,7 +301,7 @@ describe('POST /api/upload', () => {
     });
 
     it('returns 500 when addDocumentJob throws (queue enqueue failure)', async () => {
-      const { addDocumentJob } = await import('@queues/documentQueue') as {
+      const { addDocumentJob } = await import('@queues/documentQueue') as unknown as {
         addDocumentJob: ReturnType<typeof vi.fn>;
       };
       addDocumentJob.mockRejectedValueOnce(new Error('Redis connection lost'));
@@ -255,13 +315,13 @@ describe('POST /api/upload', () => {
     });
 
     it('rolls back the document row and the staged file when addDocumentJob fails', async () => {
-      const { addDocumentJob } = await import('@queues/documentQueue') as {
+      const { addDocumentJob } = await import('@queues/documentQueue') as unknown as {
         addDocumentJob: ReturnType<typeof vi.fn>;
       };
-      const { deleteDocument } = await import('@services/vectorStore') as {
+      const { deleteDocument } = await import('@services/vectorStore') as unknown as {
         deleteDocument: ReturnType<typeof vi.fn>;
       };
-      const { removeFile } = await import('@services/storage') as { removeFile: ReturnType<typeof vi.fn> };
+      const { removeFile } = await import('@services/storage') as unknown as { removeFile: ReturnType<typeof vi.fn> };
       addDocumentJob.mockRejectedValueOnce(new Error('Redis connection lost'));
 
       await authedRequest(app)
@@ -274,10 +334,10 @@ describe('POST /api/upload', () => {
     });
 
     it('does not roll back anything when the upload succeeds', async () => {
-      const { deleteDocument } = await import('@services/vectorStore') as {
+      const { deleteDocument } = await import('@services/vectorStore') as unknown as {
         deleteDocument: ReturnType<typeof vi.fn>;
       };
-      const { removeFile } = await import('@services/storage') as { removeFile: ReturnType<typeof vi.fn> };
+      const { removeFile } = await import('@services/storage') as unknown as { removeFile: ReturnType<typeof vi.fn> };
 
       await authedRequest(app)
         .post('/api/upload')
@@ -289,10 +349,10 @@ describe('POST /api/upload', () => {
     });
 
     it('returns 200 when two valid files are uploaded simultaneously', async () => {
-      const { createDocument } = await import('@services/vectorStore') as {
+      const { createDocument } = await import('@services/vectorStore') as unknown as {
         createDocument: ReturnType<typeof vi.fn>;
       };
-      const { addDocumentJob } = await import('@queues/documentQueue') as {
+      const { addDocumentJob } = await import('@queues/documentQueue') as unknown as {
         addDocumentJob: ReturnType<typeof vi.fn>;
       };
       createDocument

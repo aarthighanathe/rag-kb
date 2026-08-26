@@ -23,6 +23,7 @@ import uploadRouter from './routes/upload.js';
 import queryRouter from './routes/query.js';
 import documentsRouter from './routes/documents.js';
 import queueRouter from './routes/queue.js';
+import healthRouter from './routes/health.js';
 import { swaggerSpec } from './swagger/spec.js';
 import { logger } from './utils/logger.js';
 import { checkReadiness } from './utils/readiness.js';
@@ -69,12 +70,12 @@ export function createApp(): Application {
   app.use(globalRateLimit);
 
   // ── 6. Health checks (no auth, no rate limit beyond global) ──────────────
-  // Pure liveness — "the process is up and can answer HTTP requests" only.
-  // Orchestrators that just need "is the process alive, restart if not"
-  // should point here, not at /api/health.
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
-  });
+  // /health, /health/detailed, /health/ready, /health/live — pure liveness at
+  // the bare path, full dependency breakdown and orchestrator-conventional
+  // probe shapes at the sub-paths. See routes/health.ts; it's a thin layer
+  // over the same checkReadiness() used by /api/health below, not a
+  // duplicate implementation.
+  app.use('/health', healthRouter);
 
   // Readiness — verifies Supabase and Redis are actually reachable before
   // claiming the instance is fit to receive traffic. Returns 503 if either
@@ -84,7 +85,11 @@ export function createApp(): Application {
     const readiness = await checkReadiness();
     res.status(readiness.status === 'ok' ? 200 : 503).json({
       success: readiness.status === 'ok',
-      data: { status: readiness.status, timestamp: new Date().toISOString(), checks: readiness.checks },
+      data: {
+        status: readiness.status,
+        timestamp: new Date().toISOString(),
+        checks: readiness.checks,
+      },
       meta: { correlationId: req.correlationId },
     });
   });

@@ -25,8 +25,15 @@ vi.mock('../../hooks/useSSE', () => ({
   useSSE: vi.fn(() => ({ isConnected: false, disconnect: vi.fn() })),
 }));
 
+const { submitQueryFeedbackMock, getSuggestedTopicsMock } = vi.hoisted(() => ({
+  submitQueryFeedbackMock: vi.fn().mockResolvedValue(undefined),
+  getSuggestedTopicsMock: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock('../../services/api', () => ({
   getQueryStreamUrl: (id: string) => `/api/query/${id}/stream`,
+  submitQueryFeedback: submitQueryFeedbackMock,
+  getSuggestedTopics: getSuggestedTopicsMock,
 }));
 
 vi.mock('../../contexts/ToastContext', () => ({
@@ -73,6 +80,12 @@ function renderChat(storeOverrides: object = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // vite.config.ts sets restoreMocks: true globally, which resets a mock's
+  // configured implementation (not just its call history) before every
+  // test — re-arm the api-module mocks' default resolved values here so
+  // every test starts from a working default instead of an undefined return.
+  submitQueryFeedbackMock.mockResolvedValue(undefined);
+  getSuggestedTopicsMock.mockResolvedValue([]);
 });
 
 // ---------------------------------------------------------------------------
@@ -92,7 +105,9 @@ describe('Chat page — empty state', () => {
 
   it('renders suggested queries', () => {
     renderChat();
-    expect(screen.getByRole('button', { name: /summarize all uploaded documents/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /summarize all uploaded documents/i }),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /key topics/i })).toBeInTheDocument();
   });
 
@@ -147,8 +162,14 @@ describe('Chat page — messages', () => {
   it('renders user and assistant messages', () => {
     renderChat({
       messages: [
-        { id: '1', role: 'user',      content: 'Hello?',     timestamp: Date.now(), isStreaming: false },
-        { id: '2', role: 'assistant', content: 'Hi there!',  timestamp: Date.now(), isStreaming: false },
+        { id: '1', role: 'user', content: 'Hello?', timestamp: Date.now(), isStreaming: false },
+        {
+          id: '2',
+          role: 'assistant',
+          content: 'Hi there!',
+          timestamp: Date.now(),
+          isStreaming: false,
+        },
       ],
     });
     expect(screen.getByText('Hello?')).toBeInTheDocument();
@@ -173,7 +194,13 @@ describe('Chat page — messages', () => {
   it('renders streaming cursor for streaming messages', () => {
     renderChat({
       messages: [
-        { id: '2', role: 'assistant', content: 'Thinking', timestamp: Date.now(), isStreaming: true },
+        {
+          id: '2',
+          role: 'assistant',
+          content: 'Thinking',
+          timestamp: Date.now(),
+          isStreaming: true,
+        },
       ],
     });
     // StreamingCursor renders the blinking char; just ensure no crash and message present
@@ -188,10 +215,34 @@ describe('Chat page — Ctrl+Shift+C copies the last completed assistant answer'
 
     renderChat({
       messages: [
-        { id: '1', role: 'user',      content: 'First question',  timestamp: Date.now(), isStreaming: false },
-        { id: '2', role: 'assistant', content: 'First answer',    timestamp: Date.now(), isStreaming: false },
-        { id: '3', role: 'user',      content: 'Second question', timestamp: Date.now(), isStreaming: false },
-        { id: '4', role: 'assistant', content: 'Second answer',   timestamp: Date.now(), isStreaming: false },
+        {
+          id: '1',
+          role: 'user',
+          content: 'First question',
+          timestamp: Date.now(),
+          isStreaming: false,
+        },
+        {
+          id: '2',
+          role: 'assistant',
+          content: 'First answer',
+          timestamp: Date.now(),
+          isStreaming: false,
+        },
+        {
+          id: '3',
+          role: 'user',
+          content: 'Second question',
+          timestamp: Date.now(),
+          isStreaming: false,
+        },
+        {
+          id: '4',
+          role: 'assistant',
+          content: 'Second answer',
+          timestamp: Date.now(),
+          isStreaming: false,
+        },
       ],
     });
 
@@ -214,7 +265,13 @@ describe('Chat page — Ctrl+Shift+C copies the last completed assistant answer'
 
     renderChat({
       messages: [
-        { id: '1', role: 'user', content: 'Only a question so far', timestamp: Date.now(), isStreaming: false },
+        {
+          id: '1',
+          role: 'user',
+          content: 'Only a question so far',
+          timestamp: Date.now(),
+          isStreaming: false,
+        },
       ],
     });
 
@@ -248,9 +305,7 @@ describe('Chat page — citations', () => {
       ],
     });
     // Citation chip button should be present (IndexCard front face)
-    expect(
-      screen.getByRole('button', { name: /report\.pdf.*relevance/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /report\.pdf.*relevance/i })).toBeInTheDocument();
   });
 });
 
@@ -259,9 +314,13 @@ describe('Chat page — document filter', () => {
     renderChat({
       documents: [
         {
-          id: 'd1', filename: 'guide.pdf', status: 'ready',
-          chunk_count: 3, created_at: '2026-06-16T00:00:00Z',
-          mime_type: 'application/pdf', size_bytes: 512,
+          id: 'd1',
+          filename: 'guide.pdf',
+          status: 'ready',
+          chunk_count: 3,
+          created_at: '2026-06-16T00:00:00Z',
+          mime_type: 'application/pdf',
+          size_bytes: 512,
           updated_at: '2026-06-16T00:00:00Z',
         },
       ],
@@ -273,15 +332,23 @@ describe('Chat page — document filter', () => {
     renderChat({
       documents: [
         {
-          id: 'd1', filename: 'a.pdf', status: 'ready',
-          chunk_count: 1, created_at: '2026-06-16T00:00:00Z',
-          mime_type: 'application/pdf', size_bytes: 100,
+          id: 'd1',
+          filename: 'a.pdf',
+          status: 'ready',
+          chunk_count: 1,
+          created_at: '2026-06-16T00:00:00Z',
+          mime_type: 'application/pdf',
+          size_bytes: 100,
           updated_at: '2026-06-16T00:00:00Z',
         },
         {
-          id: 'd2', filename: 'b.pdf', status: 'ready',
-          chunk_count: 2, created_at: '2026-06-16T00:00:00Z',
-          mime_type: 'application/pdf', size_bytes: 200,
+          id: 'd2',
+          filename: 'b.pdf',
+          status: 'ready',
+          chunk_count: 2,
+          created_at: '2026-06-16T00:00:00Z',
+          mime_type: 'application/pdf',
+          size_bytes: 200,
           updated_at: '2026-06-16T00:00:00Z',
         },
       ],
@@ -297,9 +364,13 @@ describe('Chat page — document filter', () => {
     renderChat({
       documents: [
         {
-          id: 'doc-x', filename: 'x.pdf', status: 'ready',
-          chunk_count: 1, created_at: '2026-06-16T00:00:00Z',
-          mime_type: 'application/pdf', size_bytes: 100,
+          id: 'doc-x',
+          filename: 'x.pdf',
+          status: 'ready',
+          chunk_count: 1,
+          created_at: '2026-06-16T00:00:00Z',
+          mime_type: 'application/pdf',
+          size_bytes: 100,
           updated_at: '2026-06-16T00:00:00Z',
         },
       ],

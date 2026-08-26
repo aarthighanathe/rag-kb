@@ -12,13 +12,19 @@ import {
   clearHistory,
 } from '../../utils/queryHistory';
 
-const STORAGE_KEY = 'rag-kb:query-history';
+const STORAGE_KEY = 'lumina:query-history';
 
-const makeEntry = (query: string, overrides?: Partial<{ citationCount: number; confidenceLevel: 'high' | 'medium' | 'low' | 'none' }>) => ({
+const makeEntry = (
+  query: string,
+  overrides?: Partial<{
+    citationCount: number;
+    confidenceLevel: 'high' | 'medium' | 'low' | 'none';
+  }>,
+) => ({
   query,
   timestamp: new Date().toISOString(),
   citationCount: overrides?.citationCount ?? 3,
-  confidenceLevel: overrides?.confidenceLevel ?? 'medium' as const,
+  confidenceLevel: overrides?.confidenceLevel ?? ('medium' as const),
 });
 
 describe('queryHistory', () => {
@@ -33,7 +39,9 @@ describe('queryHistory', () => {
     });
 
     it('returns false when localStorage throws', () => {
-      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked'); });
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new Error('blocked');
+      });
       expect(isStorageAvailable()).toBe(false);
     });
   });

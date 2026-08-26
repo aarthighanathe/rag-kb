@@ -2,6 +2,8 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
+    { "source": "/__clerk/npm/(.*)", "destination": "https://npm.clerk.com/$1" },
+    { "source": "/__clerk/(.*)", "destination": "https://frontend-api.clerk.dev/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

@@ -42,7 +42,7 @@ export function SignInPage(): React.JSX.Element {
               color: ink.base,
             }}
           >
-            RAG KB
+            Lumina
           </span>
         </div>
         <div

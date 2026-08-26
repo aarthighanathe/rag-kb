@@ -7,7 +7,7 @@
  */
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { ChevronDown, ChevronRight, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 import type { HistoryEntry } from '../../utils/queryHistory';
 import { timeAgo } from '../../utils/timeAgo';
 
@@ -26,6 +26,20 @@ export interface QueryHistoryPanelProps {
   open?: boolean;
   /** Optional toggle handler for controlled expanded state */
   onToggle?: () => void;
+  /**
+   * Optional backend search over the caller's full query history (not just
+   * the local entries prop, which is capped to the last 10). When provided,
+   * a search input renders above the entry list; typing a term calls this
+   * with the debounced search text and swaps the displayed list to
+   * `searchResults` until the search box is cleared, at which point the
+   * panel reverts to showing `entries` as before. Omit both props entirely
+   * to keep the panel's original local-only behavior unchanged.
+   */
+  onSearch?: (query: string) => void;
+  /** Search results to display while a search term is active (ignored if `onSearch` is not provided). */
+  searchResults?: HistoryEntry[];
+  /** Whether a search request is in flight. */
+  searchLoading?: boolean;
 }
 
 /**
@@ -35,12 +49,17 @@ export interface QueryHistoryPanelProps {
  */
 function getConfidenceDotColor(level: HistoryEntry['confidenceLevel']): string {
   switch (level) {
-    case 'high':     return '#2D5A4A';
-    case 'medium':   return '#D68910';
-    case 'low':      return '#FF4D2E';
-    case 'very-low': return '#FF4D2E';
+    case 'high':
+      return '#2D5A4A';
+    case 'medium':
+      return '#D68910';
+    case 'low':
+      return '#FF4D2E';
+    case 'very-low':
+      return '#FF4D2E';
     case 'none':
-    default:         return '#8A8578';
+    default:
+      return '#8A8578';
   }
 }
 
@@ -60,12 +79,36 @@ export function QueryHistoryPanel({
   isStreaming,
   open: controlledOpen,
   onToggle,
+  onSearch,
+  searchResults,
+  searchLoading,
 }: QueryHistoryPanelProps): React.JSX.Element {
   const [internalExpanded, setInternalExpanded] = useState(entries.length > 0);
   const isControlled = controlledOpen !== undefined && onToggle !== undefined;
   const isExpanded = isControlled ? controlledOpen : internalExpanded;
   const [confirmingClear, setConfirmingClear] = useState(false);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [searchText, setSearchText] = useState('');
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isSearchActive = onSearch !== undefined && searchText.trim().length > 0;
+  const displayedEntries = isSearchActive ? (searchResults ?? []) : entries;
+
+  const handleSearchChange = useCallback(
+    (value: string) => {
+      setSearchText(value);
+      if (!onSearch) return;
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = setTimeout(() => onSearch(value), 300);
+    },
+    [onSearch],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, []);
 
   // Auto-expand on mount when entries exist (uncontrolled mode only)
   const hasMountedRef = useRef(false);
@@ -187,14 +230,43 @@ export function QueryHistoryPanel({
         )}
       </button>
 
+      {/* Search input — only rendered when the caller opted in via onSearch;
+          searches the full backend history, not just the local `entries`
+          this panel otherwise shows (capped to the last 10). */}
+      {isExpanded && onSearch && (
+        <div style={{ padding: '0 18px 8px' }}>
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <Search
+              size={12}
+              style={{ position: 'absolute', left: '8px', color: '#8A8578', pointerEvents: 'none' }}
+              aria-hidden="true"
+            />
+            <input
+              type="search"
+              data-testid="history-search-input"
+              aria-label="Search all past queries"
+              placeholder="Search all past queries…"
+              value={searchText}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '6px 8px 6px 26px',
+                background: '#141310',
+                border: '1px solid #2C2B29',
+                color: '#F7F5F0',
+                fontFamily: "'Space Grotesk', sans-serif",
+                fontSize: '11px',
+                outline: 'none',
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Entries list */}
       {isExpanded && (
-        <div
-          id="history-entries-list"
-          role="list"
-          aria-label="Query history"
-        >
-          {entries.length === 0 ? (
+        <div id="history-entries-list" role="list" aria-label="Query history">
+          {isSearchActive && searchLoading ? (
             <p
               style={{
                 padding: '10px 18px',
@@ -204,11 +276,23 @@ export function QueryHistoryPanel({
                 fontStyle: 'italic',
               }}
             >
-              No recent queries yet.
+              Searching…
+            </p>
+          ) : displayedEntries.length === 0 ? (
+            <p
+              style={{
+                padding: '10px 18px',
+                fontFamily: "'Space Mono', monospace",
+                fontSize: '10px',
+                color: '#8A8578',
+                fontStyle: 'italic',
+              }}
+            >
+              {isSearchActive ? 'No past queries match your search.' : 'No recent queries yet.'}
             </p>
           ) : (
             <>
-              {entries.map((entry) => (
+              {displayedEntries.map((entry) => (
                 <div
                   key={entry.id}
                   data-testid="history-entry"
@@ -278,8 +362,10 @@ export function QueryHistoryPanel({
                     <span>{timeAgo(entry.timestamp)}</span>
                   </div>
 
-                  {/* Delete button — visible on hover */}
-                  {!isStreaming && (
+                  {/* Delete button — visible on hover. Hidden while showing
+                      backend search results: those rows aren't part of the
+                      local 10-entry cache onRemove operates on. */}
+                  {!isStreaming && !isSearchActive && (
                     <button
                       type="button"
                       data-testid="history-delete"
@@ -320,38 +406,41 @@ export function QueryHistoryPanel({
                 </div>
               ))}
 
-              {/* Clear all button */}
-              <button
-                type="button"
-                data-testid="history-clear"
-                onClick={handleClear}
-                aria-label="Clear all query history"
-                style={{
-                  width: '100%',
-                  padding: '8px 18px',
-                  background: 'none',
-                  border: 'none',
-                  borderTop: '1px solid #2C2B29',
-                  cursor: 'pointer',
-                  fontFamily: "'Space Mono', monospace",
-                  fontSize: '9px',
-                  color: confirmingClear ? '#FF4D2E' : '#8A8578',
-                  textAlign: 'center',
-                  transition: 'color 150ms ease',
-                }}
-                onMouseEnter={(e) => {
-                  if (!confirmingClear) {
-                    (e.currentTarget as HTMLButtonElement).style.color = '#FF4D2E';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!confirmingClear) {
-                    (e.currentTarget as HTMLButtonElement).style.color = '#8A8578';
-                  }
-                }}
-              >
-                {confirmingClear ? 'Sure? Click to clear all' : 'Clear all'}
-              </button>
+              {/* Clear all button — hidden while showing backend search
+                  results, since onClear only clears the local 10-entry cache. */}
+              {!isSearchActive && (
+                <button
+                  type="button"
+                  data-testid="history-clear"
+                  onClick={handleClear}
+                  aria-label="Clear all query history"
+                  style={{
+                    width: '100%',
+                    padding: '8px 18px',
+                    background: 'none',
+                    border: 'none',
+                    borderTop: '1px solid #2C2B29',
+                    cursor: 'pointer',
+                    fontFamily: "'Space Mono', monospace",
+                    fontSize: '9px',
+                    color: confirmingClear ? '#FF4D2E' : '#8A8578',
+                    textAlign: 'center',
+                    transition: 'color 150ms ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!confirmingClear) {
+                      (e.currentTarget as HTMLButtonElement).style.color = '#FF4D2E';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!confirmingClear) {
+                      (e.currentTarget as HTMLButtonElement).style.color = '#8A8578';
+                    }
+                  }}
+                >
+                  {confirmingClear ? 'Sure? Click to clear all' : 'Clear all'}
+                </button>
+              )}
             </>
           )}
         </div>

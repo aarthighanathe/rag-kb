@@ -7,11 +7,20 @@
  * @created 2026-06-16
  */
 
+import { z } from 'zod';
 import { formatUserFacingError, isBackendUnreachable } from '../utils/formatError';
 
 // ---------------------------------------------------------------------------
 // Interfaces
 // ---------------------------------------------------------------------------
+
+/** A prior document with identical content, surfaced when a re-upload is detected. */
+export interface DuplicateDocumentInfo {
+  id: string;
+  filename: string;
+  status: string;
+  createdAt: string;
+}
 
 /** Single uploaded document from POST /api/upload response envelope. */
 export interface UploadedDocument {
@@ -19,7 +28,32 @@ export interface UploadedDocument {
   filename: string;
   status: 'pending';
   jobId: string;
+  /** Present when this upload's content matches a document the caller already owns. Informational only — the upload still proceeds. */
+  duplicateOf?: DuplicateDocumentInfo;
 }
+
+/** Validates the shape of POST /api/upload's success response body before it's trusted. */
+const uploadSuccessBodySchema = z.object({
+  success: z.literal(true),
+  data: z.object({
+    documents: z.array(
+      z.object({
+        id: z.string(),
+        filename: z.string(),
+        status: z.literal('pending'),
+        jobId: z.string(),
+        duplicateOf: z
+          .object({
+            id: z.string(),
+            filename: z.string(),
+            status: z.string(),
+            createdAt: z.string(),
+          })
+          .optional(),
+      }),
+    ),
+  }),
+});
 
 /** Backend upload response from POST /api/upload. */
 export interface UploadResponse {
@@ -27,6 +61,8 @@ export interface UploadResponse {
   filename: string;
   status: 'pending';
   jobId: string;
+  /** Present when this upload's content matches a document the caller already owns. Informational only — the upload still proceeds. */
+  duplicateOf?: DuplicateDocumentInfo;
 }
 
 /** Single document record. */
@@ -40,6 +76,8 @@ export interface DocumentRecord {
   created_at: string;
   updated_at: string;
   error_message?: string | null;
+  /** Auto-derived (from section headings) and/or user-edited tags. Empty array if none. */
+  tags: string[];
 }
 
 /** Chunk quality statistics for a processed document. */
@@ -99,6 +137,10 @@ export interface SimilarityPair {
 export interface SimilarityResponse {
   pairs: SimilarityPair[];
   documents: DocumentRecord[];
+  /** True when readyDocumentCount exceeded the server's similarity computation ceiling and no pairs were computed. */
+  capped: boolean;
+  /** Count of the caller's ready documents considered, whether or not computation actually ran. */
+  readyDocumentCount: number;
 }
 
 /** Typed error thrown by this client on non-2xx responses. */
@@ -317,6 +359,20 @@ export async function deleteDocument(id: string): Promise<void> {
   await apiFetch<void>(`/documents/${id}`, { method: 'DELETE' });
 }
 
+/**
+ * Replaces a document's full tag list (auto-derived and manually-added tags
+ * share this one field, so this call overwrites both).
+ * @param id - Document UUID
+ * @param tags - Full replacement tag list (max 20, each 1-40 chars)
+ */
+export async function updateDocumentTags(id: string, tags: string[]): Promise<string[]> {
+  const body = await apiFetch<{ success: boolean; data: { documentId: string; tags: string[] } }>(
+    `/documents/${id}/tags`,
+    { method: 'PATCH', body: JSON.stringify({ tags }) },
+  );
+  return body.data.tags;
+}
+
 /** Backend default for the similarity threshold — omit the query param when equal to this. */
 const DEFAULT_SIMILARITY_THRESHOLD = 0.3;
 
@@ -339,6 +395,72 @@ export async function getDocumentSimilarity(
     `/documents/similarity${qs ? `?${qs}` : ''}`,
   );
   return body.data;
+}
+
+/**
+ * Fetches content-aware query suggestions (distinct section headings) drawn
+ * from the given documents' chunks. Returns an empty array for documents
+ * with no detected section structure — callers should fall back to generic
+ * suggestions in that case.
+ * @param documentIds - Document UUIDs to draw headings from (1-10)
+ */
+export async function getSuggestedTopics(documentIds: string[]): Promise<string[]> {
+  if (documentIds.length === 0) return [];
+  const params = new URLSearchParams({ documentIds: documentIds.join(',') });
+  const body = await apiFetch<{ success: boolean; data: { topics: string[] } }>(
+    `/documents/suggested-topics?${params.toString()}`,
+  );
+  return body.data.topics;
+}
+
+// ---------------------------------------------------------------------------
+// Query history (durable full history, backed by query_logs)
+// ---------------------------------------------------------------------------
+
+/** One entry from GET /api/query/history — a past query from the caller's durable history. */
+export interface QueryHistoryEntry {
+  id: string;
+  queryText: string;
+  responsePreview: string | null;
+  latencyMs: number | null;
+  feedback: 'helpful' | 'not_helpful' | null;
+  validationConfidence: number | null;
+  createdAt: string;
+}
+
+/** Response shape from GET /api/query/history. */
+export interface QueryHistoryResult {
+  entries: QueryHistoryEntry[];
+  page: number;
+  total: number;
+}
+
+/**
+ * Searches the caller's full query history (the durable `query_logs` table,
+ * not the 10-entry localStorage cache used for instant client-side access).
+ * @param options - Pagination and optional text search
+ */
+export async function getQueryHistory(
+  options: {
+    page?: number;
+    limit?: number;
+    search?: string;
+  } = {},
+): Promise<QueryHistoryResult> {
+  const params = new URLSearchParams();
+  if (options.page) params.set('page', String(options.page));
+  if (options.limit) params.set('limit', String(options.limit));
+  if (options.search && options.search.trim().length > 0)
+    params.set('search', options.search.trim());
+
+  const qs = params.toString();
+  const body = await apiFetch<{
+    success: boolean;
+    data: QueryHistoryEntry[];
+    meta: { page: number; total: number };
+  }>(`/query/history${qs ? `?${qs}` : ''}`);
+
+  return { entries: body.data, page: body.meta.page, total: body.meta.total };
 }
 
 // ---------------------------------------------------------------------------
@@ -385,16 +507,24 @@ export async function uploadDocument(
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           // Backend returns { success, data: { documents: [{ id, filename, status, jobId }] }, meta }
-          const body = JSON.parse(xhr.responseText) as {
-            success: boolean;
-            data: { documents: UploadedDocument[] };
-          };
-          const doc = body.data.documents[0];
+          const rawBody: unknown = JSON.parse(xhr.responseText);
+          const parsed = uploadSuccessBodySchema.safeParse(rawBody);
+          if (!parsed.success) {
+            reject(new Error('Upload response did not match the expected shape'));
+            return;
+          }
+          const doc = parsed.data.data.documents[0];
           if (!doc) {
             reject(new Error('Upload response contained no documents'));
             return;
           }
-          resolve({ documentId: doc.id, filename: doc.filename, status: doc.status, jobId: doc.jobId });
+          resolve({
+            documentId: doc.id,
+            filename: doc.filename,
+            status: doc.status,
+            jobId: doc.jobId,
+            ...(doc.duplicateOf && { duplicateOf: doc.duplicateOf }),
+          });
         } catch {
           reject(new Error('Invalid JSON in upload response'));
         }
@@ -427,9 +557,7 @@ export async function uploadDocument(
  * @param request - Query body with search parameters
  * @returns Object containing the queryId to open the SSE stream
  */
-export async function initiateQuery(
-  request: QueryRequest,
-): Promise<{ queryId: string }> {
+export async function initiateQuery(request: QueryRequest): Promise<{ queryId: string }> {
   // Backend route is POST /api/query (returns { success, data: { queryId } })
   const body = await apiFetch<{ success: boolean; data: { queryId: string } }>('/query', {
     method: 'POST',
@@ -460,10 +588,7 @@ export type QueryFeedback = 'helpful' | 'not_helpful';
  * @param queryId - query_logs row id (ChatMessage.queryLogId)
  * @param feedback - 'helpful' | 'not_helpful'
  */
-export async function submitQueryFeedback(
-  queryId: string,
-  feedback: QueryFeedback,
-): Promise<void> {
+export async function submitQueryFeedback(queryId: string, feedback: QueryFeedback): Promise<void> {
   await apiFetch<{ success: boolean; data: { queryId: string; feedback: QueryFeedback } }>(
     `/query/${queryId}/feedback`,
     {
@@ -484,7 +609,9 @@ export async function submitQueryFeedback(
  * @param documentId - Document UUID returned by the upload endpoint
  */
 export async function getJobStatus(documentId: string): Promise<JobStatus> {
-  const body = await apiFetch<{ success: boolean; data: DocumentWithQuality }>(`/documents/${documentId}`);
+  const body = await apiFetch<{ success: boolean; data: DocumentWithQuality }>(
+    `/documents/${documentId}`,
+  );
   const doc = body.data.document;
   const stateMap: Record<DocumentRecord['status'], JobStatus['state']> = {
     pending: 'waiting',

@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CitationChip } from '../../design-system/components/CitationChip';
 
@@ -52,6 +52,29 @@ describe('CitationChip', () => {
     await userEvent.click(screen.getByRole('button', { name: /citation/i }));
     await userEvent.click(screen.getByRole('button', { name: 'Close citation panel' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('closes side panel when Escape is pressed', async () => {
+    render(<CitationChip {...baseProps} fullText="Some text." />);
+    await userEvent.click(screen.getByRole('button', { name: /citation/i }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('traps Tab focus within the panel, wrapping from the last to the first focusable element', async () => {
+    render(<CitationChip {...baseProps} fullText="Some text." />);
+    await userEvent.click(screen.getByRole('button', { name: /citation/i }));
+
+    const closeButton = screen.getByRole('button', { name: 'Close citation panel' });
+    // The close button is the only focusable element inside the panel, so
+    // Tab and Shift+Tab must both keep focus on it rather than escaping to
+    // the rest of the page.
+    act(() => closeButton.focus());
+    await userEvent.tab();
+    expect(closeButton).toHaveFocus();
+    await userEvent.tab({ shift: true });
+    expect(closeButton).toHaveFocus();
   });
 
   it('does not open panel when no fullText', async () => {

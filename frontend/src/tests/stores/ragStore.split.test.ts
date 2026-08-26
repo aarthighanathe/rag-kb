@@ -43,15 +43,15 @@ describe('ragStore — split-screen', () => {
 
   it('toggleSplitScreen persists to localStorage', () => {
     useRagStore.getState().toggleSplitScreen();
-    expect(localStorage.getItem('rag-kb:split-screen')).toBe('true');
+    expect(localStorage.getItem('lumina:split-screen')).toBe('true');
     useRagStore.getState().toggleSplitScreen();
-    expect(localStorage.getItem('rag-kb:split-screen')).toBe('false');
+    expect(localStorage.getItem('lumina:split-screen')).toBe('false');
   });
 
   it('init reads splitScreenEnabled from localStorage', () => {
-    localStorage.setItem('rag-kb:split-screen', 'true');
+    localStorage.setItem('lumina:split-screen', 'true');
     // Force re-creation by reading the stored value
-    const stored = localStorage.getItem('rag-kb:split-screen');
+    const stored = localStorage.getItem('lumina:split-screen');
     expect(stored).toBe('true');
   });
 
@@ -70,7 +70,14 @@ describe('ragStore — split-screen', () => {
 
   it('can set liveChunks via setState', () => {
     const chunks = [
-      { documentId: 'd1', documentName: 'test.pdf', chunkId: 'c1', chunkRef: 'Chunk 1', similarity: 0.9, excerpt: 'text' },
+      {
+        documentId: 'd1',
+        documentName: 'test.pdf',
+        chunkId: 'c1',
+        chunkRef: 'Chunk 1',
+        similarity: 0.9,
+        excerpt: 'text',
+      },
     ];
     useRagStore.setState({ liveChunks: chunks });
     expect(useRagStore.getState().liveChunks).toHaveLength(1);

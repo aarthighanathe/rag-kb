@@ -10,6 +10,7 @@ import { create } from 'zustand';
 import {
   listDocuments,
   deleteDocument as apiDeleteDocument,
+  updateDocumentTags as apiUpdateDocumentTags,
   uploadDocument,
   extractErrorMessage,
   initiateQuery,
@@ -46,19 +47,84 @@ const POLL_INTERVAL_MS = 3000;
  */
 const MAX_POLL_ATTEMPTS = 200;
 
+/** How many characters of a dropped turn's content are kept in its summary line. */
+const SUMMARY_SNIPPET_LENGTH = 80;
+
+/** Marker prefix identifying a synthetic summary turn, so it can be recognised and extended rather than duplicated. */
+const SUMMARY_MARKER = '[Earlier in this conversation]';
+
+/**
+ * Renders one dropped turn as a single compact summary line.
+ * @param t - The turn being dropped from the retained history window
+ * @returns One line of the form "User asked: ..." / "Assistant answered: ..."
+ */
+function summarizeTurn(t: ConversationTurn): string {
+  const snippet =
+    t.content.length > SUMMARY_SNIPPET_LENGTH
+      ? `${t.content.slice(0, SUMMARY_SNIPPET_LENGTH).trim()}…`
+      : t.content;
+  return `${t.role === 'user' ? 'User asked' : 'Assistant answered'}: ${snippet}`;
+}
+
 /**
  * Appends a turn to conversation history, truncating its content to the
- * backend's max length and trimming the oldest turns beyond the cap.
+ * backend's max length and trimming the oldest turns beyond the cap. Turns
+ * pushed out by the cap are not simply discarded — they're condensed into a
+ * single synthetic summary turn prepended to the retained window (identified
+ * by SUMMARY_MARKER), so some trace of earlier context survives a long
+ * conversation instead of vanishing the moment the 6-message window fills
+ * up. Deliberately a local, free extractive summary (first ~80 chars per
+ * dropped turn) rather than an LLM-generated one — a real summarization call
+ * would cost an extra Groq round-trip on every message once history is
+ * full, for a benefit (context beyond the last few exchanges) that's
+ * marginal for a knowledge-base Q&A tool where each turn is already
+ * independently grounded in retrieval. On a second/later trim, newly-dropped
+ * turns are appended to the existing summary's text rather than replacing
+ * it, so earlier summarized context is never silently lost.
  * @param history - Current conversation history
  * @param turn - Turn to append
- * @returns New history array, truncated and capped
+ * @returns New history array, truncated and capped, with a leading summary
+ *   turn in place of any content it displaced
  */
-function appendHistoryTurn(history: ConversationTurn[], turn: ConversationTurn): ConversationTurn[] {
-  const safeTurn = turn.content.length > MAX_HISTORY_CONTENT_LENGTH
-    ? { ...turn, content: turn.content.slice(0, MAX_HISTORY_CONTENT_LENGTH) }
-    : turn;
+export function appendHistoryTurn(
+  history: ConversationTurn[],
+  turn: ConversationTurn,
+): ConversationTurn[] {
+  const safeTurn =
+    turn.content.length > MAX_HISTORY_CONTENT_LENGTH
+      ? { ...turn, content: turn.content.slice(0, MAX_HISTORY_CONTENT_LENGTH) }
+      : turn;
   const updated = [...history, safeTurn];
-  return updated.length > MAX_HISTORY_TURNS ? updated.slice(updated.length - MAX_HISTORY_TURNS) : updated;
+  if (updated.length <= MAX_HISTORY_TURNS) return updated;
+
+  // A prior summary turn, if one exists, is always the very first element —
+  // it was itself prepended by an earlier call to this function. Peel it off
+  // before slicing dropped/retained so it's never re-summarized as if it
+  // were an ordinary conversation turn (which would nest "User asked: " in
+  // front of its own "[Earlier in this conversation]" marker instead of
+  // extending the accumulated summary text).
+  const priorSummary = updated[0]?.content.startsWith(SUMMARY_MARKER) ? updated[0] : undefined;
+  const rest0 = priorSummary ? updated.slice(1) : updated;
+
+  // Reserve one slot in the capped window for the summary turn itself, so
+  // the window still never exceeds MAX_HISTORY_TURNS (the backend's own
+  // hard cap on QueryRequestSchema.history).
+  const keepCount = MAX_HISTORY_TURNS - 1;
+  const dropped = rest0.slice(0, Math.max(0, rest0.length - keepCount));
+  const retained = rest0.slice(Math.max(0, rest0.length - keepCount));
+
+  const newLines = dropped.map(summarizeTurn);
+  const priorLines = priorSummary
+    ? priorSummary.content.slice(SUMMARY_MARKER.length).trim().split('\n')
+    : [];
+  const allLines = [...priorLines, ...newLines];
+
+  const summaryTurn: ConversationTurn = {
+    role: 'user',
+    content: `${SUMMARY_MARKER}\n${allLines.join('\n')}`.slice(0, MAX_HISTORY_CONTENT_LENGTH),
+  };
+
+  return [summaryTurn, ...retained];
 }
 
 /** A queued / in-flight / finished upload item. */
@@ -81,6 +147,8 @@ export interface UploadItem {
   processingStartedAt?: number;
   /** File size in bytes — used for ETA calculation. */
   fileSizeBytes: number;
+  /** Set when this upload's content matched a document already in the caller's knowledge base. Informational only — the upload still proceeds. */
+  duplicateOf?: { id: string; filename: string; status: string; createdAt: string };
 }
 
 /** Source citation attached to an assistant message. */
@@ -143,6 +211,8 @@ export interface RAGStore {
   fetchDocuments: () => Promise<void>;
   /** Deletes a document from the API and removes it from local state. */
   deleteDocument: (id: string) => Promise<void>;
+  /** Replaces a document's tags via the API and updates local state on success. */
+  updateDocumentTags: (id: string, tags: string[]) => Promise<void>;
 
   // ── Upload queue ───────────────────────────────────────────────────────────
   uploadQueue: UploadItem[];
@@ -244,10 +314,7 @@ export const useRagStore = create<RAGStore>((set, get) => ({
       // already be 'ready' or 'failed' even though the queue item is stuck.
       const byId = new Map(res.data.map((d) => [d.id, d]));
       get().uploadQueue.forEach((item) => {
-        if (
-          (item.status === 'processing' || item.status === 'uploading') &&
-          item.documentId
-        ) {
+        if ((item.status === 'processing' || item.status === 'uploading') && item.documentId) {
           const doc = byId.get(item.documentId);
           if (doc?.status === 'ready') {
             if (item.jobId) get().stopPolling(item.jobId);
@@ -261,7 +328,11 @@ export const useRagStore = create<RAGStore>((set, get) => ({
             set((state) => ({
               uploadQueue: state.uploadQueue.map((i) =>
                 i.id === item.id
-                  ? { ...i, status: 'failed' as const, error: doc.error_message ?? 'Processing failed' }
+                  ? {
+                      ...i,
+                      status: 'failed' as const,
+                      error: doc.error_message ?? 'Processing failed',
+                    }
                   : i,
               ),
             }));
@@ -278,6 +349,13 @@ export const useRagStore = create<RAGStore>((set, get) => ({
   deleteDocument: async (id) => {
     await apiDeleteDocument(id);
     set((state) => ({ documents: state.documents.filter((d) => d.id !== id) }));
+  },
+
+  updateDocumentTags: async (id, tags) => {
+    const updated = await apiUpdateDocumentTags(id, tags);
+    set((state) => ({
+      documents: state.documents.map((d) => (d.id === id ? { ...d, tags: updated } : d)),
+    }));
   },
 
   // ── Upload queue ───────────────────────────────────────────────────────────
@@ -317,6 +395,7 @@ export const useRagStore = create<RAGStore>((set, get) => ({
             documentId: result.documentId,
             jobId: result.jobId,
             processingStartedAt: Date.now(),
+            ...(result.duplicateOf && { duplicateOf: result.duplicateOf }),
           });
           get().startPolling(result.jobId, result.documentId);
           succeeded += 1;
@@ -337,7 +416,13 @@ export const useRagStore = create<RAGStore>((set, get) => ({
     set((state) => ({
       uploadQueue: state.uploadQueue.map((i) =>
         i.id === id
-          ? { ...i, status: 'queued' as const, progress: 0, error: undefined, processingStartedAt: undefined }
+          ? {
+              ...i,
+              status: 'queued' as const,
+              progress: 0,
+              error: undefined,
+              processingStartedAt: undefined,
+            }
           : i,
       ),
     }));
@@ -360,9 +445,22 @@ export const useRagStore = create<RAGStore>((set, get) => ({
   liveChunks: [],
   queryPhase: 'idle' as const,
 
-  // ── Split-screen init from localStorage ─────────────────────────────────
+  // ── Split-screen init from localStorage with legacy migration ───────────
   splitScreenEnabled: (() => {
-    try { return localStorage.getItem('rag-kb:split-screen') === 'true'; } catch { return false; }
+    try {
+      const legacyKey = 'rag-kb:split-screen';
+      const newKey = 'lumina:split-screen';
+      const legacyVal = localStorage.getItem(legacyKey);
+      if (legacyVal !== null) {
+        if (localStorage.getItem(newKey) === null) {
+          localStorage.setItem(newKey, legacyVal);
+        }
+        localStorage.removeItem(legacyKey);
+      }
+      return localStorage.getItem(newKey) === 'true';
+    } catch {
+      return false;
+    }
   })(),
 
   sendQuery: async (query, documentIds) => {
@@ -395,7 +493,10 @@ export const useRagStore = create<RAGStore>((set, get) => ({
     // Compute the prospective history (current turn included) without
     // committing it to state yet — only persisted on success, so a failed
     // request doesn't leave an orphaned turn for the next retry to inherit.
-    const prospectiveHistory = appendHistoryTurn(get().conversationHistory, { role: 'user', content: query });
+    const prospectiveHistory = appendHistoryTurn(get().conversationHistory, {
+      role: 'user',
+      content: query,
+    });
 
     // matchCount and similarityThreshold must match backend QueryRequestSchema field names
     const request: QueryRequest = {
@@ -418,7 +519,14 @@ export const useRagStore = create<RAGStore>((set, get) => ({
 
   clearChat: () => {
     get().clearHistory();
-    set({ messages: [], currentQuery: '', isStreaming: false, streamingText: '', citations: [], currentQueryId: null });
+    set({
+      messages: [],
+      currentQuery: '',
+      isStreaming: false,
+      streamingText: '',
+      citations: [],
+      currentQueryId: null,
+    });
   },
 
   setCurrentQuery: (q) => set({ currentQuery: q }),
@@ -440,7 +548,13 @@ export const useRagStore = create<RAGStore>((set, get) => ({
       const messages = [...state.messages];
       const last = messages[messages.length - 1];
       if (last?.role === 'assistant') {
-        messages[messages.length - 1] = { ...last, isStreaming: false, citations, latencyMs, queryLogId };
+        messages[messages.length - 1] = {
+          ...last,
+          isStreaming: false,
+          citations,
+          latencyMs,
+          queryLogId,
+        };
         // Add the completed assistant turn to conversation history
         get().addToHistory({ role: 'assistant', content: last.content });
       }
@@ -496,7 +610,11 @@ export const useRagStore = create<RAGStore>((set, get) => ({
   toggleSplitScreen: () => {
     set((state) => {
       const next = !state.splitScreenEnabled;
-      try { localStorage.setItem('rag-kb:split-screen', String(next)); } catch { /* ignore */ }
+      try {
+        localStorage.setItem('lumina:split-screen', String(next));
+      } catch {
+        /* ignore */
+      }
       return { splitScreenEnabled: next };
     });
   },
@@ -528,9 +646,7 @@ export const useRagStore = create<RAGStore>((set, get) => ({
 
       const patch = (p: Partial<UploadItem>) =>
         set((state) => ({
-          uploadQueue: state.uploadQueue.map((i) =>
-            i.jobId === jobId ? { ...i, ...p } : i,
-          ),
+          uploadQueue: state.uploadQueue.map((i) => (i.jobId === jobId ? { ...i, ...p } : i)),
         }));
 
       // Cap total polling duration — a worker that crashes without writing

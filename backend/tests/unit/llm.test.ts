@@ -30,6 +30,9 @@ import {
   buildMessages,
   streamAnswer,
   extractCitations,
+  extractCitedIndices,
+  filterCitationsByModelOutput,
+  RELEVANCE_BAND_THRESHOLDS,
   type ConversationTurn,
 } from '../../src/services/llm';
 import { LLMError, LLMErrorCode } from '../../src/utils/errors';
@@ -44,6 +47,7 @@ const makeChunk = (overrides: Partial<RetrievedChunk> = {}): RetrievedChunk => (
   similarity: 0.92,
   metadata: { char_start: 0, char_end: 57 },
   filename: 'rag-overview.pdf',
+  source: 'vector',
   ...overrides,
 });
 
@@ -56,6 +60,21 @@ async function* makeTokenStream(tokens: string[]) {
 }
 
 beforeEach(() => vi.clearAllMocks());
+
+// ─── RELEVANCE_BAND_THRESHOLDS ─────────────────────────────────────────────────
+
+describe('RELEVANCE_BAND_THRESHOLDS', () => {
+  it('matches frontend/src/utils/calculateConfidence.ts THRESHOLDS exactly', () => {
+    // These two constants live in separate runtimes (backend vs. browser bundle)
+    // and can't share an import. If this fails, update BOTH files together —
+    // the LLM's self-reported relevance band and the UI confidence badge must agree.
+    expect(RELEVANCE_BAND_THRESHOLDS).toEqual({
+      high: 0.25,
+      medium: 0.12,
+      low: 0.04,
+    });
+  });
+});
 
 // ─── buildSystemPrompt ────────────────────────────────────────────────────────
 
@@ -74,6 +93,28 @@ describe('buildSystemPrompt', () => {
   it('encodes the no-hallucination rule', () => {
     const prompt = buildSystemPrompt();
     expect(prompt.toLowerCase()).toMatch(/hallucinate|fabricate/);
+  });
+
+  it('instructs the model to hedge when passages are marked low relevance', () => {
+    const prompt = buildSystemPrompt();
+    expect(prompt.toLowerCase()).toMatch(/relevance/);
+    expect(prompt.toLowerCase()).toMatch(/hedge|does not clearly cover/);
+  });
+
+  it('instructs the model to surface disagreement between sources', () => {
+    const prompt = buildSystemPrompt();
+    expect(prompt.toLowerCase()).toMatch(/disagree/);
+  });
+
+  it('includes few-shot examples covering a normal answer, a low-relevance hedge, and a contradiction', () => {
+    const prompt = buildSystemPrompt();
+    expect(prompt).toContain('Few-Shot Examples:');
+    // Normal cited-answer example
+    expect(prompt).toMatch(/Context:.*Question:.*Answer:/s);
+    // Hedged low-relevance example
+    expect(prompt.toLowerCase()).toContain('does not clearly cover');
+    // Contradiction example
+    expect(prompt.toLowerCase()).toContain('sources disagree');
   });
 });
 
@@ -95,6 +136,35 @@ describe('buildContextString', () => {
 
   it('returns empty string for empty chunk array', () => {
     expect(buildContextString([])).toBe('');
+  });
+
+  it('labels a high-similarity chunk as high relevance', () => {
+    const result = buildContextString([makeChunk({ similarity: 0.30 })]);
+    expect(result).toContain('relevance: high');
+  });
+
+  it('labels a mid-similarity chunk as medium relevance', () => {
+    const result = buildContextString([makeChunk({ similarity: 0.15 })]);
+    expect(result).toContain('relevance: medium');
+  });
+
+  it('labels a low-similarity chunk as low relevance', () => {
+    const result = buildContextString([makeChunk({ similarity: 0.05 })]);
+    expect(result).toContain('relevance: low');
+  });
+
+  it('labels a near-zero-similarity chunk as very-low relevance', () => {
+    const result = buildContextString([makeChunk({ similarity: 0.01 })]);
+    expect(result).toContain('relevance: very-low');
+  });
+
+  it('uses the same thresholds as the frontend confidence indicator (0.25 / 0.12 / 0.04 boundaries)', () => {
+    expect(buildContextString([makeChunk({ similarity: 0.25 })])).toContain('relevance: high');
+    expect(buildContextString([makeChunk({ similarity: 0.249 })])).toContain('relevance: medium');
+    expect(buildContextString([makeChunk({ similarity: 0.12 })])).toContain('relevance: medium');
+    expect(buildContextString([makeChunk({ similarity: 0.119 })])).toContain('relevance: low');
+    expect(buildContextString([makeChunk({ similarity: 0.04 })])).toContain('relevance: low');
+    expect(buildContextString([makeChunk({ similarity: 0.039 })])).toContain('relevance: very-low');
   });
 });
 
@@ -309,5 +379,86 @@ describe('extractCitations', () => {
     const chunk = makeChunk({ similarity: 0.919876 });
     const [citation] = extractCitations([chunk]);
     expect(citation?.similarity).toBe(0.92);
+  });
+});
+
+// ─── extractCitedIndices ──────────────────────────────────────────────────────
+
+describe('extractCitedIndices', () => {
+  it('extracts a single citation number', () => {
+    expect(extractCitedIndices('The answer is here [1].')).toEqual([1]);
+  });
+
+  it('extracts multiple citation numbers in first-appearance order', () => {
+    expect(extractCitedIndices('See [2] and [1], also [3].')).toEqual([2, 1, 3]);
+  });
+
+  it('deduplicates repeated markers', () => {
+    expect(extractCitedIndices('[1] confirms this, and [1] again.')).toEqual([1]);
+  });
+
+  it('returns an empty array when no markers are present', () => {
+    expect(extractCitedIndices('No citations in this answer.')).toEqual([]);
+  });
+
+  it('ignores non-numeric or malformed brackets', () => {
+    expect(extractCitedIndices('See [note] and [1].')).toEqual([1]);
+  });
+
+  // Regression: the regex previously matched any `[N]` with no context
+  // awareness, so markdown footnote-definition syntax ("[1]: http://...")
+  // was indistinguishable from a real citation marker.
+  it('ignores markdown footnote-definition syntax ([N]:)', () => {
+    expect(extractCitedIndices('See the source [1]: http://example.com for details.')).toEqual([]);
+  });
+
+  it('still extracts a real citation elsewhere in text that also contains a footnote definition', () => {
+    expect(extractCitedIndices('As shown in [2].\n\n[1]: http://example.com')).toEqual([2]);
+  });
+
+  // Regression: the regex previously matched any `[N]` with no context
+  // awareness, so an array-index code reference like "arr[1]" was
+  // indistinguishable from a real citation marker.
+  it('ignores array-index-style code references (word char immediately before [N])', () => {
+    expect(extractCitedIndices('The code does `arr[1]` to access the second element.')).toEqual([]);
+  });
+
+  it('still extracts a real citation adjacent to, but not touching, code-like text', () => {
+    expect(extractCitedIndices('Per the docs [1], arr[2] returns the third element.')).toEqual([1]);
+  });
+});
+
+// ─── filterCitationsByModelOutput ─────────────────────────────────────────────
+
+describe('filterCitationsByModelOutput', () => {
+  const citations = [
+    { documentId: 'd1', filename: 'a.pdf', chunkId: 'c1', similarity: 0.3, excerpt: 'A' },
+    { documentId: 'd2', filename: 'b.pdf', chunkId: 'c2', similarity: 0.2, excerpt: 'B' },
+    { documentId: 'd3', filename: 'c.pdf', chunkId: 'c3', similarity: 0.1, excerpt: 'C' },
+  ];
+
+  it('keeps only citations the model actually referenced', () => {
+    const result = filterCitationsByModelOutput(citations, 'Per [1] and [3], this is true.');
+    expect(result.map((c) => c.chunkId)).toEqual(['c1', 'c3']);
+  });
+
+  it('preserves original retrieval order regardless of citation order in text', () => {
+    const result = filterCitationsByModelOutput(citations, 'Per [3] and [1], this is true.');
+    expect(result.map((c) => c.chunkId)).toEqual(['c1', 'c3']);
+  });
+
+  it('falls back to the full list when the model cited nothing', () => {
+    const result = filterCitationsByModelOutput(citations, 'No sources needed for this.');
+    expect(result).toEqual(citations);
+  });
+
+  it('drops out-of-range hallucinated citation numbers', () => {
+    const result = filterCitationsByModelOutput(citations, 'Per [1] and [7], this is true.');
+    expect(result.map((c) => c.chunkId)).toEqual(['c1']);
+  });
+
+  it('falls back to the full list when every cited number is out of range', () => {
+    const result = filterCitationsByModelOutput(citations, 'Per [9] alone.');
+    expect(result).toEqual(citations);
   });
 });

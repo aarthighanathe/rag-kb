@@ -8,6 +8,7 @@
 import crypto from 'crypto';
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { getQueue, getJobStatus } from '../queues/documentQueue.js';
+import { getCacheStats } from '../services/queryEmbeddingCache.js';
 import { AppError } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { env } from '../config/env.js';
@@ -28,8 +29,7 @@ function requireAdmin(req: Request, res: Response, next: NextFunction): void {
   }
   const secretBuf = Buffer.from(String(secret));
   const expectedBuf = Buffer.from(env.ADMIN_SECRET);
-  if (secretBuf.length !== expectedBuf.length ||
-      !crypto.timingSafeEqual(secretBuf, expectedBuf)) {
+  if (secretBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(secretBuf, expectedBuf)) {
     logger.warn('Unauthorized admin queue access attempt', {
       correlationId: req.correlationId,
       ip: req.ip,
@@ -69,6 +69,19 @@ router.get(
     }
   },
 );
+
+/**
+ * GET /api/queue/cache-stats
+ * Returns in-process hit/miss/error counters for the query-embedding cache
+ * and the derived hit rate. Counters reset on process restart.
+ */
+router.get('/cache-stats', requireAdmin, (req: Request, res: Response): void => {
+  res.json({
+    success: true,
+    data: getCacheStats(),
+    meta: { correlationId: req.correlationId },
+  });
+});
 
 /**
  * GET /api/queue/job/:jobId

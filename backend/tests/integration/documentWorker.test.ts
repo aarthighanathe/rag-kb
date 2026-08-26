@@ -18,6 +18,10 @@ const mockUpsertChunks = vi.fn();
 const mockUpdateChunkCount = vi.fn();
 const mockDownloadFile = vi.fn();
 const mockRemoveFile = vi.fn();
+// clearAllMocks (used throughout this file) clears call history but not
+// implementations, so these defaults set once here survive every beforeEach.
+const mockSetAutoTags = vi.fn().mockResolvedValue(undefined);
+const mockDeriveAutoTags = vi.fn().mockReturnValue([]);
 
 vi.mock('@services/chunker', () => ({
   extractText: mockExtractText,
@@ -32,6 +36,8 @@ vi.mock('@services/vectorStore', () => ({
   updateDocumentStatus: mockUpdateDocumentStatus,
   upsertChunks: mockUpsertChunks,
   updateChunkCount: mockUpdateChunkCount,
+  setAutoTags: mockSetAutoTags,
+  deriveAutoTags: mockDeriveAutoTags,
 }));
 
 vi.mock('@services/storage', () => ({
@@ -170,8 +176,8 @@ describe('documentWorker — happy path', () => {
       expect.any(AbortSignal),
     );
     const firstCall = (mockUpdateDocumentStatus as Mock).mock.calls[0];
-    expect(firstCall[0]).toBe('doc-uuid-111');
-    expect(firstCall[1]).toBe('processing');
+    expect(firstCall![0]).toBe('doc-uuid-111');
+    expect(firstCall![1]).toBe('processing');
   });
 
   it('calls services in the correct order: extract → chunk → embed → store', async () => {
@@ -200,7 +206,7 @@ describe('documentWorker — happy path', () => {
     await getProcessor()(job);
 
     const progressCalls = (job.updateProgress as Mock).mock.calls.map(
-      ([p]: [number]) => p,
+      ([p]: number[]) => p,
     );
     expect(progressCalls).toEqual([20, 40, 70, 90, 100]);
   });
@@ -248,7 +254,7 @@ describe('documentWorker — happy path', () => {
     await getProcessor()(job);
 
     const readyCall = (mockUpdateDocumentStatus as Mock).mock.calls.find(
-      ([, status]: [string, string]) => status === 'ready',
+      ([, status]: string[]) => status === 'ready',
     );
     expect(readyCall).toBeDefined();
     expect(readyCall![0]).toBe('doc-uuid-111');
@@ -290,7 +296,7 @@ describe('documentWorker — failure handling', () => {
     await expect(getProcessor()(job)).rejects.toThrow('PDF corrupt header');
 
     const failedCall = (mockUpdateDocumentStatus as Mock).mock.calls.find(
-      ([, status]: [string, string]) => status === 'failed',
+      ([, status]: string[]) => status === 'failed',
     );
     expect(failedCall).toBeDefined();
     expect(failedCall![2]).toBe('PDF corrupt header');
@@ -306,7 +312,7 @@ describe('documentWorker — failure handling', () => {
     await expect(getProcessor()(job)).rejects.toThrow('HuggingFace rate limited');
 
     const failedCall = (mockUpdateDocumentStatus as Mock).mock.calls.find(
-      ([, status]: [string, string]) => status === 'failed',
+      ([, status]: string[]) => status === 'failed',
     );
     expect(failedCall![2]).toBe('HuggingFace rate limited');
   });

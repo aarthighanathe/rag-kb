@@ -43,6 +43,7 @@ const mockChunk: RetrievedChunk = {
   similarity: 0.95,
   metadata: { char_start: 0, char_end: 60 },
   filename: 'smoke-test.txt',
+  source: 'vector',
 };
 
 // Mock all external service calls
@@ -52,11 +53,20 @@ vi.mock('@services/vectorStore', () => ({
   updateChunkCount:     vi.fn().mockResolvedValue(undefined),
   upsertChunks:         vi.fn().mockResolvedValue(undefined),
   similaritySearch:     vi.fn().mockResolvedValue([mockChunk]),
+  hybridSearch:         vi.fn().mockResolvedValue([mockChunk]),
   listDocuments:        vi.fn().mockResolvedValue({ data: [mockReadyDoc], total: 1 }),
   getDocument:          vi.fn().mockResolvedValue(mockReadyDoc),
   deleteDocument:       vi.fn().mockResolvedValue(undefined),
-  logQuery:             vi.fn().mockResolvedValue(undefined),
+  logQuery:             vi.fn().mockResolvedValue('query-log-uuid'),
+  setQueryFeedback:     vi.fn().mockResolvedValue(undefined),
+  setQueryValidation:   vi.fn().mockResolvedValue(undefined),
   getChunkQualityStats: vi.fn().mockResolvedValue({ shortChunkCount: 0, longChunkCount: 0, avgTokenCount: 50, grade: 'good' }),
+  insertAuditLog:       vi.fn().mockResolvedValue(undefined),
+  findDocumentByHash:   vi.fn().mockResolvedValue(null),
+}));
+
+vi.mock('@services/answerValidator', () => ({
+  validateAnswer: vi.fn().mockResolvedValue({ isValid: true, confidence: 1, issues: [], suggestions: [], durationMs: 0 }),
 }));
 
 vi.mock('@queues/documentQueue', () => ({
@@ -109,6 +119,7 @@ vi.mock('@services/llm', () => ({
       excerpt: 'This is a smoke test document with enough content to embed.',
     },
   ]),
+  filterCitationsByModelOutput: vi.fn().mockImplementation((citations: unknown[]) => citations),
   setSseHeaders: vi.fn().mockImplementation((res: import('express').Response) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');

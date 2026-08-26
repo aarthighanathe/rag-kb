@@ -94,6 +94,36 @@ const envSchema = z.object({
   // Used by requireAuth middleware to verify JWTs issued by Clerk (Google OAuth).
   CLERK_SECRET_KEY: z.string().min(1, 'CLERK_SECRET_KEY is required'),
   CLERK_PUBLISHABLE_KEY: z.string().min(1, 'CLERK_PUBLISHABLE_KEY is required'),
+
+  // ── Query rewriting (HyDE-lite, optional) ─────────────────────────────────
+  // Defaults to disabled: it adds one extra Groq call (latency + cost) per
+  // query, and is intended to be A/B tested against the baseline rather than
+  // switched on unconditionally. See services/queryRewriter.ts.
+  QUERY_REWRITE_ENABLED: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true'),
+
+  // ── Local re-ranking (optional) ────────────────────────────────────────────
+  // Re-ranks top-N vector-search results locally (similarity + term-overlap
+  // blend) before the LLM sees them — no external API call, despite the env
+  // var name (kept for backwards compatibility; the implementation is not
+  // an actual cross-encoder model). See services/localReranker.ts.
+  CROSS_ENCODER_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => v === 'true'),
+
+  // ── Post-hoc answer validation (optional) ─────────────────────────────────
+  // Defaults to disabled: runs a second Groq call after every completed stream
+  // to fact-check the answer and write validation_confidence to query_logs.
+  // Adds one extra API call per query (latency + cost) and is intended to be
+  // A/B tested or enabled per-environment rather than on unconditionally.
+  // See routes/query.ts and services/answerValidator.ts.
+  ANSWER_VALIDATION_ENABLED: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true'),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -105,7 +105,10 @@ describe('uploadDocument — timeout configuration', () => {
     expect(xhr.timeout).toBeGreaterThan(0);
     expect(Number.isFinite(xhr.timeout)).toBe(true);
 
-    xhr.simulateSuccess({ success: true, data: { documents: [{ id: 'd1', filename: 'report.pdf', status: 'pending', jobId: 'j1' }] } });
+    xhr.simulateSuccess({
+      success: true,
+      data: { documents: [{ id: 'd1', filename: 'report.pdf', status: 'pending', jobId: 'j1' }] },
+    });
     await promise;
   });
 
@@ -136,7 +139,9 @@ describe('uploadDocument — existing success/error paths still work', () => {
 
     xhr.simulateSuccess({
       success: true,
-      data: { documents: [{ id: 'doc-1', filename: 'report.pdf', status: 'pending', jobId: 'job-1' }] },
+      data: {
+        documents: [{ id: 'doc-1', filename: 'report.pdf', status: 'pending', jobId: 'job-1' }],
+      },
     });
 
     await expect(promise).resolves.toEqual({
@@ -165,7 +170,78 @@ describe('uploadDocument — existing success/error paths still work', () => {
 
     expect(onProgress).toHaveBeenCalledWith(50);
 
-    xhr.simulateSuccess({ success: true, data: { documents: [{ id: 'd1', filename: 'report.pdf', status: 'pending', jobId: 'j1' }] } });
+    xhr.simulateSuccess({
+      success: true,
+      data: { documents: [{ id: 'd1', filename: 'report.pdf', status: 'pending', jobId: 'j1' }] },
+    });
     await promise;
+  });
+});
+
+describe('uploadDocument — response shape validation', () => {
+  it('resolves with duplicateOf when the backend includes it and it matches the expected shape', async () => {
+    const promise = uploadDocument(makeFile());
+    const xhr = await waitForXhr();
+
+    xhr.simulateSuccess({
+      success: true,
+      data: {
+        documents: [
+          {
+            id: 'doc-1',
+            filename: 'report.pdf',
+            status: 'pending',
+            jobId: 'job-1',
+            duplicateOf: {
+              id: 'doc-0',
+              filename: 'report.pdf',
+              status: 'ready',
+              createdAt: '2026-01-01T00:00:00.000Z',
+            },
+          },
+        ],
+      },
+    });
+
+    await expect(promise).resolves.toMatchObject({
+      documentId: 'doc-1',
+      duplicateOf: {
+        id: 'doc-0',
+        filename: 'report.pdf',
+        status: 'ready',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    });
+  });
+
+  it('rejects when a 200 response body does not match the expected schema (missing required field)', async () => {
+    const promise = uploadDocument(makeFile());
+    const xhr = await waitForXhr();
+
+    // 'jobId' is missing — a malformed/unexpected success body.
+    xhr.simulateSuccess({
+      success: true,
+      data: { documents: [{ id: 'doc-1', filename: 'report.pdf', status: 'pending' }] },
+    });
+
+    await expect(promise).rejects.toThrow(/did not match the expected shape/i);
+  });
+
+  it('rejects when the 200 response body is a completely different shape (e.g. an error envelope mislabeled success)', async () => {
+    const promise = uploadDocument(makeFile());
+    const xhr = await waitForXhr();
+
+    xhr.simulateSuccess({ success: true, message: 'unexpected shape' });
+
+    await expect(promise).rejects.toThrow(/did not match the expected shape/i);
+  });
+
+  it('rejects when documents is an empty array (schema-valid but no document to return)', async () => {
+    const promise = uploadDocument(makeFile());
+    const xhr = await waitForXhr();
+
+    xhr.simulateSuccess({ success: true, data: { documents: [] } });
+
+    await expect(promise).rejects.toThrow(/no documents/i);
   });
 });

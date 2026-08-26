@@ -54,7 +54,7 @@ import {
   cancelDocumentJob,
   DOCUMENT_QUEUE_NAME,
 } from '@queues/documentQueue';
-import type { DocumentJobData } from '@types/index';
+import type { DocumentJobData } from '../../src/types/index.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
