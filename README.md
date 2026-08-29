@@ -56,8 +56,8 @@ API docs: http://localhost:3000/api/docs
                  ▼                  ▼                    ▼
         ┌────────────────┐ ┌──────────────┐    ┌──────────────────┐
         │  BullMQ Queue   │ │  Supabase     │    │  Groq API         │
-        │  (Redis)        │ │  (pgvector)   │    │  llama-3.1-8b-    │
-        │  document-      │ │  documents,   │    │  instant          │
+        │  (Redis)        │ │  (pgvector)   │    │  openai/gpt-oss-  │
+        │  document-      │ │  documents,   │    │  20b              │
         │  processing     │ │  chunks,      │    │  (streaming)      │
         └────────┬────────┘ │  match_chunks │    └──────────────────┘
                  │           └──────────────┘
@@ -85,10 +85,10 @@ always remote/cloud-hosted — there is no local Postgres container.
 ### Query flow
 1. User types a question into the Chat textarea and submits (`sendQuery` in `ragStore.ts`).
 2. Frontend: user turn added to `conversationHistory`; `POST /api/query` sent (with the user's Clerk JWT) with `{query, documentIds?, matchCount, similarityThreshold, relativeFloorGap?, history}`.
-3. Backend stores the validated query in an in-memory map keyed by a new `queryId` (2-minute TTL) and returns `{queryId}` immediately.
+3. Backend stores the validated query in Redis, keyed by a new `queryId` (2-minute TTL, enforced by Redis's own key expiry), and returns `{queryId}` immediately.
 4. Frontend opens `GET /api/query/stream?queryId=...` via `useSSE` (native `EventSource`, with exponential-backoff reconnect up to 3 attempts). This route can't carry the JWT (EventSource has no custom-header support), so it trusts the unguessable, single-use `queryId` instead.
 5. Backend: consumes the pending query → emits `searching` → runs the query through the prompt-injection guard → sanitizes the query text → embeds it via HuggingFace (cache-checked first) → calls the `match_chunks` Supabase RPC (cosine similarity, IVFFlat index, relative-similarity floor, scoped to the query's owner) → re-ranks the results locally (similarity + keyword overlap) → emits `found` with citation data.
-6. If chunks were retrieved, backend emits `generating`, then streams the Groq `llama-3.1-8b-instant` completion token-by-token as `token` events (system prompt + capped history + formatted context chunks + query).
+6. If chunks were retrieved, backend emits `generating`, then streams the Groq `openai/gpt-oss-20b` completion token-by-token as `token` events (system prompt + capped history + formatted context chunks + query).
 7. Backend emits `complete` with final citations and latency; SSE connection closes.
 8. Frontend: each `token` event appends to the streaming assistant message; on `complete`, citations are attached and the assistant turn is added to conversation history.
 
@@ -148,7 +148,7 @@ rag-kb/
 │   │   │   ├── queryEmbeddingCache.ts  # Redis cache for single-query embeddings
 │   │   │   ├── localReranker.ts        # Local similarity+keyword-overlap re-ranking (no external API)
 │   │   │   ├── queryRewriter.ts        # Optional HyDE-lite query rewrite + contextual retrieval
-│   │   │   ├── llm.ts                  # Groq LLM streaming (llama-3.1-8b-instant)
+│   │   │   ├── llm.ts                  # Groq LLM streaming (openai/gpt-oss-20b)
 │   │   │   ├── answerValidator.ts      # Post-hoc answer validation (hallucination/contradiction checks)
 │   │   │   ├── vectorStore.ts          # Supabase pgvector ops, similarity, tags, chunk quality
 │   │   │   ├── storage.ts              # Supabase Storage staging (upload → worker handoff)

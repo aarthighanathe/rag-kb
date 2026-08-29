@@ -45,9 +45,9 @@ const DEFAULT_CHUNK_OPTIONS: ChunkOptions = {
 
 /**
  * Estimates the token count for a string using gpt-tokenizer's cl100k_base
- * encoding — a real subword tokenizer, not an exact match for Groq's
- * llama-3.1-8b-instant (Llama uses its own SentencePiece-based tokenizer,
- * with no lightweight pure-JS implementation available), but far closer to
+ * encoding — a real subword tokenizer, not an exact match for the Groq
+ * model actually in use (see MODEL_ID in llm.ts; no lightweight pure-JS
+ * implementation of its own tokenizer is available), but far closer to
  * real token counts than the previous 1-token-≈-4-chars heuristic, especially
  * for non-English text where the char-count heuristic diverges most.
  * @param text - Input text

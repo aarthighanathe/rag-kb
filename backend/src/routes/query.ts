@@ -43,17 +43,18 @@ import { sanitizeQueryText } from '../utils/sanitize.js';
 import { logger } from '../utils/logger.js';
 import { NotFoundError } from '../types/index.js';
 import { env } from '../config/env.js';
+import { getRedisClient } from '../utils/redisClient.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const QUERY_TTL_MS = 2 * 60 * 1000; // 2 minutes
+const QUERY_TTL_SECONDS = QUERY_TTL_MS / 1000;
 const SSE_TIMEOUT_MS = 60 * 1000; // 60s hard timeout — kills hung Groq streams
-const PENDING_QUERY_SWEEP_INTERVAL_MS = 60 * 1000; // sweep expired entries once a minute
+const PENDING_QUERY_REDIS_PREFIX = 'pending-query:';
 
 interface PendingQuery {
   params: QueryRequest;
   correlationId: string;
-  expiresAt: number;
   /**
    * Owner captured from the verified JWT at POST time. The GET /stream endpoint
    * is opened via native EventSource, which cannot attach an Authorization header,
@@ -65,52 +66,62 @@ interface PendingQuery {
 }
 
 /**
+ * Backed by Redis (not an in-memory Map) so a queryId survives an app-process
+ * restart between POST /api/query and GET /stream — on a single-instance host
+ * this matters whenever the process redeploys, crashes, or (on a free-tier
+ * host that spins down on idle) cold-starts in between the two requests. It
+ * would also be required for correctness (not just this edge case) if the
+ * service ever ran with more than one instance, since a load balancer could
+ * route the GET to a process that never saw the POST.
+ *
  * A GET /stream attempt against this entry does NOT delete it (see
  * claimPendingQuery) — a dropped connection's exponential-backoff reconnect
  * (useSSE.ts) targets the same queryId, and deleting on first GET made every
  * such reconnect 404 unconditionally, defeating Rule 17's reconnect
  * requirement. Instead the entry lives until the stream finishes
- * (finalizePendingQuery) or its TTL sweeps it, so a reconnect within the TTL
- * window re-claims it and restarts the query (search + generation) rather
- * than failing outright — there is no server-side token buffer to truly
- * resume a partial answer from.
+ * (finalizePendingQuery) or Redis's own key TTL expires it, so a reconnect
+ * within the TTL window re-claims it and restarts the query (search +
+ * generation) rather than failing outright — there is no server-side token
+ * buffer to truly resume a partial answer from.
  */
 
-const pendingQueries = new Map<string, PendingQuery>();
-
 /**
- * Stores validated query params keyed by a new UUID.
+ * Stores validated query params keyed by a new UUID, with a Redis TTL as the
+ * single source of expiry (no separate in-process sweep needed — Redis
+ * evicts the key itself once QUERY_TTL_SECONDS elapses).
  * @param params - Validated QueryRequest from Zod
  * @param correlationId - Request correlation ID
  * @param userId - Authenticated owner of this query (from req.auth.userId)
  * @returns The generated queryId
  */
-function storePendingQuery(params: QueryRequest, correlationId: string, userId: string): string {
+async function storePendingQuery(
+  params: QueryRequest,
+  correlationId: string,
+  userId: string,
+): Promise<string> {
   const queryId = uuidv4();
-  pendingQueries.set(queryId, {
-    params,
-    correlationId,
-    expiresAt: Date.now() + QUERY_TTL_MS,
-    userId,
-  });
+  const entry: PendingQuery = { params, correlationId, userId };
+  await getRedisClient().set(
+    PENDING_QUERY_REDIS_PREFIX + queryId,
+    JSON.stringify(entry),
+    'EX',
+    QUERY_TTL_SECONDS,
+  );
   return queryId;
 }
 
 /**
  * Retrieves a pending query without deleting it — a subsequent GET /stream
  * reconnect against the same queryId (e.g. after a network blip) must still
- * find it. Returns null if not found or expired.
+ * find it. Returns null if not found or expired (Redis returns null for a
+ * missing/TTL-expired key, so no manual expiry check is needed here).
  * @param queryId - UUID returned by POST /api/query
  * @returns PendingQuery or null
  */
-function claimPendingQuery(queryId: string): PendingQuery | null {
-  const entry = pendingQueries.get(queryId);
-  if (!entry) return null;
-  if (Date.now() > entry.expiresAt) {
-    pendingQueries.delete(queryId);
-    return null;
-  }
-  return entry;
+async function claimPendingQuery(queryId: string): Promise<PendingQuery | null> {
+  const raw = await getRedisClient().get(PENDING_QUERY_REDIS_PREFIX + queryId);
+  if (!raw) return null;
+  return JSON.parse(raw) as PendingQuery;
 }
 
 /**
@@ -119,33 +130,9 @@ function claimPendingQuery(queryId: string): PendingQuery | null {
  * which must leave the entry in place for a reconnect to re-claim.
  * @param queryId - UUID returned by POST /api/query
  */
-function finalizePendingQuery(queryId: string): void {
-  pendingQueries.delete(queryId);
+async function finalizePendingQuery(queryId: string): Promise<void> {
+  await getRedisClient().del(PENDING_QUERY_REDIS_PREFIX + queryId);
 }
-
-/**
- * Periodically evicts expired entries from `pendingQueries`, independent of
- * whether the client ever opens GET /stream. Without this sweep, a client
- * that posts queries and never opens the matching SSE stream grows this
- * process-local Map without bound — since it's in-memory (not Redis-backed),
- * sustained abuse (bounded only by the query rate limit) degrades or crashes
- * the Node process. `unref()` so this timer never keeps the process alive on
- * its own during graceful shutdown.
- */
-const pendingQuerySweepTimer = setInterval(() => {
-  const now = Date.now();
-  let evicted = 0;
-  for (const [queryId, entry] of pendingQueries) {
-    if (now > entry.expiresAt) {
-      pendingQueries.delete(queryId);
-      evicted++;
-    }
-  }
-  if (evicted > 0) {
-    logger.debug('Swept expired pending queries', { evicted, remaining: pendingQueries.size });
-  }
-}, PENDING_QUERY_SWEEP_INTERVAL_MS);
-pendingQuerySweepTimer.unref();
 
 // ─── SSE helpers ──────────────────────────────────────────────────────────────
 
@@ -174,22 +161,27 @@ router.post(
   requireAuth,
   promptInjectionGuard,
   validate(QueryRequestSchema),
-  (req: Request, res: Response): void => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const params = req.body as QueryRequest;
-    const queryId = storePendingQuery(params, req.correlationId, req.auth!.userId);
 
-    logger.info('Query registered', {
-      correlationId: req.correlationId,
-      queryId,
-      queryLength: params.query.length,
-    });
-    logQuerySubmit(req.auth!.userId, queryId, params.query.length, true, req.correlationId);
+    try {
+      const queryId = await storePendingQuery(params, req.correlationId, req.auth!.userId);
 
-    res.json({
-      success: true,
-      data: { queryId },
-      meta: { correlationId: req.correlationId },
-    });
+      logger.info('Query registered', {
+        correlationId: req.correlationId,
+        queryId,
+        queryLength: params.query.length,
+      });
+      logQuerySubmit(req.auth!.userId, queryId, params.query.length, true, req.correlationId);
+
+      res.json({
+        success: true,
+        data: { queryId },
+        meta: { correlationId: req.correlationId },
+      });
+    } catch (err) {
+      next(err);
+    }
   },
 );
 
@@ -608,7 +600,7 @@ router.get(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const { queryId } = req.query as unknown as { queryId: string };
 
-    const pending = claimPendingQuery(queryId);
+    const pending = await claimPendingQuery(queryId);
     if (!pending) {
       next(new NotFoundError('Query not found or expired (TTL: 2 minutes)'));
       return;
@@ -625,17 +617,17 @@ router.get(
       // its isConnected() guards without ever finishing — the entry must
       // stay claimed so a reconnect against this queryId can retry the
       // pipeline instead of 404ing.
-      if (ctx.didFinish()) finalizePendingQuery(queryId);
+      if (ctx.didFinish()) await finalizePendingQuery(queryId);
     } catch (err) {
       ctx.clearSseTimeout();
       if (!res.headersSent) {
-        finalizePendingQuery(queryId);
+        await finalizePendingQuery(queryId);
         next(err);
       } else {
         const message = err instanceof Error ? err.message : 'Query failed';
         ctx.emit('error', { type: 'error', message });
         ctx.endStream();
-        finalizePendingQuery(queryId);
+        await finalizePendingQuery(queryId);
         requestLogger.error('Unexpected error in SSE stream', { queryId, error: message });
       }
     }

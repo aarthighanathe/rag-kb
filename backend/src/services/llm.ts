@@ -16,7 +16,17 @@ import type { MatchChunksResult, SourceCitation } from '../types/index.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const MODEL_ID = 'llama-3.1-8b-instant';
+const MODEL_ID = 'openai/gpt-oss-20b';
+
+/**
+ * gpt-oss-20b is a reasoning model — without this, most of its output budget
+ * goes to a separate `reasoning` delta stream (not `content`, which is all
+ * doGroqStream reads below), so the user-visible answer arrives slow and
+ * truncated. 'low' keeps reasoning overhead minimal while still producing
+ * clean, complete `content` deltas suited to this app's low-latency
+ * streaming RAG design (ADR-005).
+ */
+const REASONING_EFFORT = 'low';
 
 /** Default sampling temperature for RAG completions — low for factual precision. */
 const DEFAULT_TEMPERATURE = 0.1;
@@ -407,6 +417,7 @@ async function doGroqStream(
       max_tokens: 1024,
       stream: true,
       messages,
+      reasoning_effort: REASONING_EFFORT,
     },
     { signal },
   );

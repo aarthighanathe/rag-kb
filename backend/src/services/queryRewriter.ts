@@ -19,7 +19,10 @@ import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { getGroqClient } from './llm.js';
 
-const MODEL_ID = 'llama-3.1-8b-instant';
+const MODEL_ID = 'openai/gpt-oss-20b';
+
+/** See llm.ts's REASONING_EFFORT comment — keeps reasoning-token overhead minimal on this reasoning model. */
+const REASONING_EFFORT = 'low';
 
 /** Low temperature and a small token budget — this is a short reformulation, not an answer. */
 const REWRITE_TEMPERATURE = 0.2;
@@ -97,6 +100,7 @@ export async function rewriteQueryForRetrieval(
         model: MODEL_ID,
         temperature: REWRITE_TEMPERATURE,
         max_tokens: REWRITE_MAX_TOKENS,
+        reasoning_effort: REASONING_EFFORT,
         messages: [
           { role: 'system', content: REWRITE_SYSTEM_PROMPT },
           { role: 'user', content: userContent },

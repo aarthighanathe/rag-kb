@@ -32,7 +32,7 @@ the codebase after your task, the task is NOT complete.
 
 ## Project Overview
 
-**Lumina** — A production-grade Retrieval-Augmented Generation system where users upload documents (PDF, TXT, MD, DOCX, HTML). Documents are chunked, embedded via HuggingFace (`sentence-transformers/all-MiniLM-L6-v2`), stored in Supabase pgvector, and queried via Groq LLM (`llama-3.1-8b-instant`) with streamed answers and source citations.
+**Lumina** — A production-grade Retrieval-Augmented Generation system where users upload documents (PDF, TXT, MD, DOCX, HTML). Documents are chunked, embedded via HuggingFace (`sentence-transformers/all-MiniLM-L6-v2`), stored in Supabase pgvector, and queried via Groq LLM (`openai/gpt-oss-20b`) with streamed answers and source citations.
 
 ---
 
@@ -211,7 +211,7 @@ npm run db:setup          # Run migrations + connectivity check
 | Vector Database | Supabase (pgvector) | PostgreSQL-native |
 | Job Queue | BullMQ 5 | Backed by Redis |
 | Cache / Broker | Redis 7 Alpine | |
-| LLM Provider | Groq | `llama-3.1-8b-instant` |
+| LLM Provider | Groq | `openai/gpt-oss-20b` (`reasoning_effort: 'low'`) |
 | Embeddings | HuggingFace Inference API | `all-MiniLM-L6-v2` (384-dim) |
 | Validation | Zod 3 | Schema-first |
 | Logging | Winston 3 | Correlation ID, JSON transport |
@@ -251,7 +251,7 @@ Document ingestion (parse → chunk → embed → store) is CPU-intensive and ca
 `all-MiniLM-L6-v2` is free-tier compatible, produces 384-dimensional vectors (small storage footprint), and delivers strong semantic similarity performance for knowledge-base retrieval at this scale.
 
 ### ADR-005: Groq over OpenAI for LLM Inference
-Groq delivers significantly higher tokens/second throughput critical for streaming UX. `llama-3.1-8b-instant` provides strong reasoning at low latency and cost.
+Groq delivers significantly higher tokens/second throughput critical for streaming UX. `openai/gpt-oss-20b` (run with `reasoning_effort: 'low'` to minimize non-content reasoning-token overhead) provides strong reasoning at low latency and cost; it replaced `llama-3.1-8b-instant` after Groq discontinued that model.
 
 ---
 

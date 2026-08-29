@@ -21,10 +21,11 @@ import type { RetrievedChunk } from '../types/index.js';
 // ─── Configuration ─────────────────────────────────────────────────────────────
 
 const VALIDATION_CONFIG = {
-  // Same fast model used for generation (ADR-005) — this is a background
-  // check, not a user-facing reasoning task, so the 70b model isn't worth
-  // the extra latency/cost on Groq's free tier.
-  model: 'llama-3.1-8b-instant',
+  // Same model used for generation (ADR-005, llm.ts).
+  model: 'openai/gpt-oss-20b',
+  // See llm.ts's REASONING_EFFORT comment — keeps reasoning-token overhead
+  // minimal on this reasoning model.
+  reasoningEffort: 'low',
   temperature: 0.1,
   maxTokens: 512,
   minConfidence: 0.6,
@@ -162,6 +163,7 @@ export async function validateAnswer(
       ],
       temperature: VALIDATION_CONFIG.temperature,
       max_tokens: VALIDATION_CONFIG.maxTokens,
+      reasoning_effort: VALIDATION_CONFIG.reasoningEffort,
       response_format: { type: 'json_object' },
     });
 
