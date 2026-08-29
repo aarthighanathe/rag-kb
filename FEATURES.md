@@ -1,6 +1,6 @@
 # Lumina — Feature Reference
 
-> Last updated: 2026-08-27
+> Last updated: 2026-08-29
 > Stack: React 19 + Vite + TypeScript · Express 5 · Supabase pgvector ·
 > BullMQ + Redis · Groq API · HuggingFace Embeddings · Clerk (Google OAuth)
 
@@ -646,8 +646,8 @@ Status: ✅ (by design)
 How it works:
 - The frontend opens this route with the browser's native `EventSource`, which cannot attach custom headers — so it cannot carry a bearer token, and `requireAuth` is deliberately **not** mounted on it.
 - Instead, `POST /api/query` (which *is* authenticated) captures `req.auth!.userId` into the in-memory `PendingQuery` entry alongside the query params, keyed by a freshly generated `queryId`.
-- `GET /api/query/stream?queryId=...` consumes that entry once (`consumePendingQuery` deletes it on read) and uses its stored `userId` — never a fresh auth check — for the `similaritySearch` call and the `query_logs` write.
-- The `queryId` itself is the security boundary: an unguessable UUID v4, handed only to the user who created it (in the authenticated POST response), single-use, and expiring after 2 minutes. This is the same trust model as a signed, short-lived download URL.
+- `GET /api/query/stream?queryId=...` reads that entry via `claimPendingQuery` (`backend/src/routes/query.ts`) and uses its stored `userId` — never a fresh auth check — for the `similaritySearch` call and the `query_logs` write. Claiming does **not** delete the entry: a dropped SSE connection's exponential-backoff reconnect (`useSSE.ts`) targets the same `queryId`, so the entry must still be there to re-claim. It's only removed by `finalizePendingQuery` once the stream genuinely finishes (completed, errored terminally, or timed out), or by the periodic sweep once its TTL lapses.
+- The `queryId` itself is the security boundary: an unguessable UUID v4, handed only to the user who created it (in the authenticated POST response), reusable only within its 2-minute TTL (not single-use — see above), and process-local (see Known Issues: it does not survive a backend restart or run correctly behind more than one instance). This is the same trust model as a signed, short-lived download URL.
 - Swagger documents this route with `security: []` and an explanatory note rather than `bearerAuth`, so the spec doesn't claim a header requirement that would never actually be checked.
 
 ### 9.4 Audit Logging
@@ -896,7 +896,8 @@ Files:
 | Issue | Location | Severity | Workaround |
 |---|---|---|---|
 | Clerk Google OAuth uses Clerk's shared dev credentials by default; production deployments need their own Google Cloud OAuth 2.0 credentials wired into Clerk | Clerk Dashboard → SSO Connections → Google | Med | Follow console.cloud.google.com → APIs → Credentials before going to production |
-| `GET /api/query/stream` is not independently authenticated (EventSource can't send an Authorization header) — it trusts the `queryId` capability instead of a fresh JWT check | `backend/src/routes/query.ts` | Low | Intentional design (see FEATURES.md §9.3); queryId is unguessable, single-use, and 2-minute TTL |
+| `GET /api/query/stream` is not independently authenticated (EventSource can't send an Authorization header) — it trusts the `queryId` capability instead of a fresh JWT check | `backend/src/routes/query.ts` | Low | Intentional design (see FEATURES.md §9.3); queryId is unguessable, reusable only within its 2-minute TTL, and process-local |
+| The `pendingQueries` map bridging `POST /api/query` and `GET /api/query/stream` is an in-memory `Map`, not Redis-backed — a `queryId` issued by one backend process is invisible to any other process. On Render's free tier (`render.yaml`, single instance, `WEB_CONCURRENCY=1`) this only bites when the process restarts (redeploy, crash, or idle spin-down) between the POST and the GET, which surfaces to the user as a `404 NOT_FOUND — "Query not found or expired"` even though the 2-minute TTL hadn't elapsed. Would also break correctness (not just this edge case) if the service ever ran with more than one instance, since a load balancer could route the GET to a process that never saw the POST | `backend/src/routes/query.ts` | Med | Re-POST the query (client-side retry/re-ask) to get a fresh `queryId` against the currently-running process; a durable fix would move `pendingQueries` into Redis (already a dependency via BullMQ) before scaling past one instance |
 | Zip bomb detection reads ZIP headers without decompressing — a crafted archive with falsified headers could still bypass the ratio check in ways not covered by the data-descriptor guard | `backend/src/utils/fileValidator.ts` | Med | Full mitigation requires sandboxed decompression |
 | No prompt-injection filtering or content/AV scanning on uploaded files beyond magic bytes and zip-bomb checks | `backend/src/utils/sanitize.ts`, `backend/src/utils/fileValidator.ts` | Med | Deferred — would require a classifier (prompt injection) or ClamAV/cloud AV integration (file scanning) |
 | A job that outlives its 5-minute hard timeout is signalled via `AbortSignal` at every write checkpoint (extractText itself still runs to completion, since it has no cancellation-aware checkpoints of its own) rather than being forcibly killed — Node has no primitive to abort arbitrary in-flight async work. The abandoned run still consumes worker resources until it naturally reaches its next checkpoint and exits via `JobCancelledError`. | `backend/src/queues/workers/documentWorker.ts` | Low | Acceptable at worker concurrency=1 and the project's expected document sizes; full cancellation would additionally require passing the signal into `extractText` itself |

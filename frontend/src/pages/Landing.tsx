@@ -404,7 +404,7 @@ function HeroSection(): React.JSX.Element {
             textTransform: 'uppercase',
           }}
         >
-          RAG KNOWLEDGE BASE
+          LUMINA
         </p>
 
         <h1

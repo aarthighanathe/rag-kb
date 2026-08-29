@@ -344,7 +344,7 @@ Vite only reads `frontend/.env.local`.
 | `SUPABASE_SERVICE_KEY` | Yes | — | Supabase service_role key (not anon) |
 | `DATABASE_URL` | Yes (migrations) | — | Postgres connection string for `npm run db:migrate` |
 | `REDIS_URL` | Yes | `redis://localhost:6379` | Redis connection URL for BullMQ |
-| `REDIS_PASSWORD` | No | `changeme` | Redis password (must match docker-compose) |
+| `REDIS_PASSWORD` | Yes | — | Redis password (must match docker-compose; `changeme` in `.env.example` is a placeholder, not a real default) |
 | `PORT` | No | `3000` | HTTP server port |
 | `NODE_ENV` | No | `development` | `development` \| `production` \| `test` |
 | `CORS_ORIGIN` | No | `http://localhost:5173` | Exact allowed frontend origin |
@@ -367,6 +367,7 @@ Vite only reads `frontend/.env.local`.
 |---|---|---|---|
 | `VITE_API_BASE_URL` | No | `/api` | Absolute backend URL (only when frontend/backend aren't same-origin, e.g. a split Render/Vercel deploy) |
 | `VITE_CLERK_PUBLISHABLE_KEY` | Yes | — | Same value as `CLERK_PUBLISHABLE_KEY` (pk_...) — used by the frontend Clerk provider |
+| `VITE_MAX_FILE_SIZE_MB` | No | `10` | Client-side max upload size per file in MB (pre-check only; kept in sync with backend's `MAX_FILE_SIZE_MB`, which is the enforced source of truth) |
 
 ---
 
