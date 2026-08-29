@@ -531,7 +531,7 @@ Two layers, covering two different kinds of duplicate:
 | Button | ✅ | Primary action trigger | `primary`, `secondary`, `ghost`, `danger` · `sm`/`md`/`lg`, loading/icon-only states |
 | ChatMessage | ✅ | Renders a single chat turn with citations | `user`/`assistant` roles, streaming cursor, copy-to-clipboard, citation chip + index-card row. Exported wrapped in `React.memo` with a custom by-value comparator for the same reason as AssistantMessage |
 | CitationChip | ✅ | Numbered source citation badge | Relevance meter bar, expandable side panel with full excerpt |
-| CitationMarker | ✅ | Inline citation superscript with bidirectional highlight | Active state turns red, scrolls card into view on click, accessible with ARIA |
+| CitationMarker | ✅ | Inline citation superscript with bidirectional highlight | Active state turns red, scrolls card into view on click, accessible with ARIA. Fixed-size circular badge (`minWidth`/`height` + flex centering, not padding alone) at an 11px bold monospace numeral — large enough to read at a glance and guaranteed to stay circular and fully contain the digit(s) regardless of 1- vs 2-digit citation numbers |
 | ColHeader | ✅ | Sortable table column header | Extracted from Documents.tsx; also exports the `SortKey`/`SortDir` types the page's own sort state uses |
 | ConfidenceBar | ✅ | Horizontal confidence bar based on average similarity | Shows level label, progress bar, and optional warning; hidden during streaming |
 | DeleteModal | ✅ | Delete confirmation modal | Extracted from Documents.tsx; used for both single and bulk document deletion |

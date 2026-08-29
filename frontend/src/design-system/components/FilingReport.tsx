@@ -30,17 +30,20 @@ const GRADE_CONFIG: Record<
   good: {
     bg: '#2D5A4A',
     label: 'GOOD ✓',
-    description: 'Most of this document was split into well-sized pieces. Answers drawn from it should be reliable.',
+    description:
+      'Most of this document was split into well-sized pieces. Answers drawn from it should be reliable.',
   },
   fair: {
     bg: '#D68910',
     label: 'FAIR',
-    description: 'Some pieces of this document came out too short or too long. Answers should still work, but may occasionally miss context.',
+    description:
+      'Some pieces of this document came out too short or too long. Answers should still work, but may occasionally miss context.',
   },
   poor: {
     bg: '#FF4D2E',
     label: 'POOR',
-    description: 'Most of this document came out too short or too long to search well. Answers based on it may be incomplete or miss the point.',
+    description:
+      'Most of this document came out too short or too long to search well. Answers based on it may be incomplete or miss the point.',
   },
 };
 
@@ -119,7 +122,14 @@ export function FilingReport({ stats, filename }: FilingReportProps): React.JSX.
           aria-label={`Filing report for ${filename}`}
         >
           {/* Header */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: '8px',
+            }}
+          >
             <span
               style={{
                 fontFamily: "'Space Mono', monospace",
@@ -137,9 +147,9 @@ export function FilingReport({ stats, filename }: FilingReportProps): React.JSX.
                 background: config.bg,
                 color: '#FFFFFF',
                 fontFamily: "'Space Mono', monospace",
-                fontSize: '9px',
+                fontSize: '11px',
                 fontWeight: 700,
-                padding: '2px 6px',
+                padding: '2px 7px',
                 transform: 'rotate(-1.5deg)',
                 display: 'inline-block',
               }}
@@ -150,14 +160,30 @@ export function FilingReport({ stats, filename }: FilingReportProps): React.JSX.
           </div>
 
           {/* Plain-language explanation — always visible, not hidden behind a hover tooltip */}
-          <p style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: '12px', color: '#5C5850', lineHeight: 1.5, marginBottom: '10px' }}>
+          <p
+            style={{
+              fontFamily: "'Space Grotesk', sans-serif",
+              fontSize: '12px',
+              color: '#5C5850',
+              lineHeight: 1.5,
+              marginBottom: '10px',
+            }}
+          >
             {config.description}
             {likelyCause && <> {likelyCause}</>}
           </p>
 
           {/* Stats */}
-          <p style={{ fontFamily: "'Space Mono', monospace", fontSize: '11px', color: '#1C1B19', marginBottom: '8px' }}>
-            {stats.totalChunks} chunk{stats.totalChunks === 1 ? '' : 's'} · avg {stats.avgTokenCount} tokens per chunk
+          <p
+            style={{
+              fontFamily: "'Space Mono', monospace",
+              fontSize: '11px',
+              color: '#1C1B19',
+              marginBottom: '8px',
+            }}
+          >
+            {stats.totalChunks} chunk{stats.totalChunks === 1 ? '' : 's'} · avg{' '}
+            {stats.avgTokenCount} tokens per chunk
           </p>
 
           {/* Distribution bar */}
@@ -171,20 +197,20 @@ export function FilingReport({ stats, filename }: FilingReportProps): React.JSX.
             role="img"
             aria-label={`Chunk distribution: ${stats.shortChunkCount} short, ${optimal} optimal, ${stats.longChunkCount} long`}
           >
-            {shortPct > 0 && (
-              <div style={{ width: `${shortPct}%`, background: '#C0392B' }} />
-            )}
+            {shortPct > 0 && <div style={{ width: `${shortPct}%`, background: '#C0392B' }} />}
             {optimalPct > 0 && (
-              <div data-testid={FILING_BAR} style={{ width: `${optimalPct}%`, background: '#2D5A4A' }} />
+              <div
+                data-testid={FILING_BAR}
+                style={{ width: `${optimalPct}%`, background: '#2D5A4A' }}
+              />
             )}
-            {longPct > 0 && (
-              <div style={{ width: `${longPct}%`, background: '#D68910' }} />
-            )}
+            {longPct > 0 && <div style={{ width: `${longPct}%`, background: '#D68910' }} />}
           </div>
 
           {/* Counts */}
           <p style={{ fontFamily: "'Space Mono', monospace", fontSize: '10px', color: '#8A8578' }}>
-            {stats.shortChunkCount} too short · {stats.longChunkCount} too long · {optimal} well-sized
+            {stats.shortChunkCount} too short · {stats.longChunkCount} too long · {optimal}{' '}
+            well-sized
           </p>
         </div>
       )}

@@ -102,7 +102,14 @@ export function DocFilterPanel({
         >
           All documents
         </span>
-        <span style={{ fontFamily: "'Space Mono', monospace", fontSize: '9px', color: '#8A8578' }}>
+        <span
+          style={{
+            fontFamily: "'Space Mono', monospace",
+            fontSize: '11px',
+            fontWeight: 700,
+            color: '#8A8578',
+          }}
+        >
           {readyDocs.length}
         </span>
         {documentsLoading && <LoadingSpinner size="sm" />}

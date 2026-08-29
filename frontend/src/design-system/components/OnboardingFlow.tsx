@@ -32,7 +32,8 @@ const STEPS = [
   {
     num: '03',
     title: 'Ask anything.',
-    description: 'Come back here and ask questions in plain language. Every answer cites its source.',
+    description:
+      'Come back here and ask questions in plain language. Every answer cites its source.',
     Icon: MessageCircle,
   },
 ];
@@ -74,7 +75,13 @@ export function OnboardingFlow(): React.JSX.Element {
         >
           Your knowledge base is empty.
         </h2>
-        <p style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: isMobile ? '12px' : '14px', color: '#8A8578' }}>
+        <p
+          style={{
+            fontFamily: "'Space Grotesk', sans-serif",
+            fontSize: isMobile ? '12px' : '14px',
+            color: '#8A8578',
+          }}
+        >
           Let's file your first document.
         </p>
       </div>
@@ -115,7 +122,7 @@ export function OnboardingFlow(): React.JSX.Element {
                 background: '#FF4D2E',
                 color: '#FFFFFF',
                 fontFamily: "'Space Mono', monospace",
-                fontSize: '9px',
+                fontSize: '11px',
                 fontWeight: 700,
                 width: '22px',
                 height: '22px',
@@ -150,7 +157,14 @@ export function OnboardingFlow(): React.JSX.Element {
             >
               {step.title}
             </h3>
-            <p style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: isMobile ? '10px' : '12px', color: '#5C5850', lineHeight: 1.4 }}>
+            <p
+              style={{
+                fontFamily: "'Space Grotesk', sans-serif",
+                fontSize: isMobile ? '10px' : '12px',
+                color: '#5C5850',
+                lineHeight: 1.4,
+              }}
+            >
               {step.description}
             </p>
           </div>
@@ -175,14 +189,25 @@ export function OnboardingFlow(): React.JSX.Element {
           width: '100%',
           transition: 'background 150ms ease',
         }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#E6431F'; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#FF4D2E'; }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = '#E6431F';
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.background = '#FF4D2E';
+        }}
       >
         Upload your first document →
       </button>
 
       {/* Accepted types hint */}
-      <p style={{ fontFamily: "'Space Mono', monospace", fontSize: isMobile ? '9px' : '11px', color: '#6B6862', marginTop: '12px' }}>
+      <p
+        style={{
+          fontFamily: "'Space Mono', monospace",
+          fontSize: isMobile ? '9px' : '11px',
+          color: '#6B6862',
+          marginTop: '12px',
+        }}
+      >
         PDF · DOCX · TXT · MD · up to 10 MB
       </p>
     </div>

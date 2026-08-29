@@ -40,18 +40,18 @@ function toChatCitation(c: Citation, i: number): ChatCitation {
  * @param liveChunks - Retrieved citation chunks
  * @param queryPhase - Current SSE phase
  */
-export function SourcePanel({
-  liveChunks,
-  queryPhase,
-}: SourcePanelProps): React.JSX.Element {
+export function SourcePanel({ liveChunks, queryPhase }: SourcePanelProps): React.JSX.Element {
   const { activeCitation, onCitationEnter, onCitationLeave } = useChatLayout();
   const cardRefs = useRef<Map<number, HTMLElement | null>>(new Map());
 
   const similarities = liveChunks.map((c) => c.similarity);
 
-  const handleCardEnter = useCallback((index: number) => {
-    onCitationEnter(index);
-  }, [onCitationEnter]);
+  const handleCardEnter = useCallback(
+    (index: number) => {
+      onCitationEnter(index);
+    },
+    [onCitationEnter],
+  );
 
   const handleCardLeave = useCallback(() => {
     onCitationLeave();
@@ -69,10 +69,7 @@ export function SourcePanel({
       }}
     >
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div
-        className="flex items-center gap-2 mb-3"
-        style={{ flexShrink: 0 }}
-      >
+      <div className="flex items-center gap-2 mb-3" style={{ flexShrink: 0 }}>
         <span
           style={{
             fontFamily: "'Space Mono', monospace",
@@ -88,12 +85,17 @@ export function SourcePanel({
           <span
             style={{
               fontFamily: "'Space Mono', monospace",
-              fontSize: '9px',
+              fontSize: '11px',
+              fontWeight: 700,
               background: '#2D5A4A',
               color: '#FFFFFF',
               borderRadius: '50%',
-              padding: '1px 6px',
-              lineHeight: '14px',
+              minWidth: '16px',
+              height: '16px',
+              padding: '0 3px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
             }}
           >
             {liveChunks.length}
@@ -154,7 +156,16 @@ export function SourcePanel({
               gap: '8px',
             }}
           >
-            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#FF4D2E', animation: 'pulse 1.5s infinite' }} aria-hidden="true" />
+            <span
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: '#FF4D2E',
+                animation: 'pulse 1.5s infinite',
+              }}
+              aria-hidden="true"
+            />
             Searching knowledge base
           </p>
           {/* Indeterminate progress bar */}
@@ -186,10 +197,7 @@ export function SourcePanel({
           {/* Confidence bar (compact) */}
           {!queryPhase.includes('searching') && similarities.length > 0 && (
             <div data-testid="source-confidence" className="mb-4">
-              <ConfidenceBar
-                similarities={similarities}
-                isStreaming={queryPhase === 'streaming'}
-              />
+              <ConfidenceBar similarities={similarities} isStreaming={queryPhase === 'streaming'} />
             </div>
           )}
 
