@@ -21,9 +21,9 @@ vi.mock('@supabase/supabase-js', () => ({
 }));
 
 vi.mock('groq-sdk', () => ({
-  default: vi.fn().mockImplementation(() => ({
-    models: { list: mockModelsList },
-  })),
+  default: class MockGroq {
+    models = { list: mockModelsList };
+  },
 }));
 
 vi.mock('@queues/documentQueue', () => ({

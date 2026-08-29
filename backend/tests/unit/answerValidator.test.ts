@@ -13,9 +13,9 @@ import type { RetrievedChunk } from '../../src/types/index';
 const { mockCreate } = vi.hoisted(() => ({ mockCreate: vi.fn() }));
 
 vi.mock('groq-sdk', () => ({
-  default: vi.fn().mockImplementation(() => ({
-    chat: { completions: { create: mockCreate } },
-  })),
+  default: class MockGroq {
+    chat = { completions: { create: mockCreate } };
+  },
 }));
 
 vi.mock('../../src/config/env', () => ({

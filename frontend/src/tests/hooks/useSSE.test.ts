@@ -55,9 +55,13 @@ class MockEventSource {
 
 beforeEach(() => {
   MockEventSource.instances = [];
-  vi.spyOn(globalThis, 'EventSource' as never).mockImplementation(
-    (...args: unknown[]) => new MockEventSource(args[0] as string) as unknown as EventSource,
-  );
+  (
+    vi.spyOn(globalThis, 'EventSource') as unknown as {
+      mockImplementation: (impl: unknown) => void;
+    }
+  ).mockImplementation(function (this: unknown, ...args: unknown[]) {
+    return new MockEventSource(args[0] as string) as unknown as EventSource;
+  });
 });
 
 afterEach(() => {

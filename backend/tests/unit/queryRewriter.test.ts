@@ -15,9 +15,9 @@ const { mockCreate, mockEnv } = vi.hoisted(() => ({
 }));
 
 vi.mock('groq-sdk', () => ({
-  default: vi.fn().mockImplementation(() => ({
-    chat: { completions: { create: mockCreate } },
-  })),
+  default: class MockGroq {
+    chat = { completions: { create: mockCreate } };
+  },
 }));
 
 vi.mock('../../src/config/env', () => ({ env: mockEnv }));
