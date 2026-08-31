@@ -913,15 +913,19 @@ const FEATURE_GRID_ITEMS: FeatureGridItem[] = [
   },
 ];
 
+// Small alternating tilt per card index — gives the masonry board a
+// hand-pinned feel without randomizing on every render.
+const STAMP_ROTATIONS = [-1.2, 0.8, -0.5, 1.4, -0.9, 0.6, -1.5, 1.1, -0.6, 0.9, -1.1, 0.5];
+
 function FeatureGridSection(): React.JSX.Element {
   return (
     <section
       data-testid="feature-grid-section"
       style={{ background: C.paperDeep, flexShrink: 0 }}
-      className="px-5 py-10 md:px-10 md:py-14"
+      className="px-5 py-8 md:px-10 md:py-10"
       aria-labelledby="feature-grid-heading"
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '40px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' }}>
         <span
           id="feature-grid-heading"
           style={{
@@ -936,57 +940,129 @@ function FeatureGridSection(): React.JSX.Element {
           EVERYTHING ELSE IN THE ARCHIVE
         </span>
         <div style={{ flex: 1, height: '1px', background: C.paperBorder }} />
+        <span
+          style={{
+            fontFamily: FONT_MONO,
+            fontSize: '10px',
+            color: C.inkHint,
+            letterSpacing: '0.1em',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {String(FEATURE_GRID_ITEMS.length).padStart(2, '0')} ENTRIES
+        </span>
       </div>
 
-      <div
-        style={{ display: 'grid', gap: '1px', background: C.paperBorder }}
-        className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
-      >
-        {FEATURE_GRID_ITEMS.map((item) => {
+      {/* Deterministic per-card tilt/lift so the board looks hand-pinned but never reflows on re-render. */}
+      <div style={{ columnGap: '18px' }} className="columns-1 sm:columns-2 lg:columns-3">
+        {FEATURE_GRID_ITEMS.map((item, index) => {
           const Icon = item.icon;
+          const rotation = STAMP_ROTATIONS[index % STAMP_ROTATIONS.length];
           return (
             <div
               key={item.title}
               data-testid="feature-grid-item"
-              style={{ background: C.white, padding: '24px' }}
+              tabIndex={0}
+              style={{
+                background: C.paperSurface,
+                border: `1px solid ${C.paperBorder}`,
+                boxShadow: '0 2px 6px rgba(28,27,25,0.08)',
+                padding: '18px 18px 16px',
+                marginBottom: '18px',
+                position: 'relative',
+                cursor: 'default',
+                breakInside: 'avoid',
+                transform: `rotate(${rotation}deg)`,
+                transformOrigin: 'center top',
+                transition: 'transform 200ms ease, box-shadow 200ms ease',
+              }}
+              onMouseEnter={(e) => {
+                const card = e.currentTarget;
+                card.style.transform = 'rotate(0deg) translateY(-3px)';
+                card.style.boxShadow = '0 12px 22px rgba(28,27,25,0.16)';
+                card.style.zIndex = '1';
+                const icon = card.querySelector<HTMLElement>('[data-role="icon-glyph"]');
+                const pin = card.querySelector<HTMLElement>('[data-role="pin"]');
+                if (icon) icon.style.color = C.stampRed;
+                if (pin) pin.style.background = C.stampRed;
+              }}
+              onMouseLeave={(e) => {
+                const card = e.currentTarget;
+                card.style.transform = `rotate(${rotation}deg)`;
+                card.style.boxShadow = '0 2px 6px rgba(28,27,25,0.08)';
+                card.style.zIndex = '0';
+                const icon = card.querySelector<HTMLElement>('[data-role="icon-glyph"]');
+                const pin = card.querySelector<HTMLElement>('[data-role="pin"]');
+                if (icon) icon.style.color = C.archiveGreen;
+                if (pin) pin.style.background = C.archiveGreen;
+              }}
             >
-              <div
+              <span
+                data-role="pin"
                 aria-hidden="true"
                 style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: '36px',
-                  height: '36px',
-                  background: C.paperMuted,
-                  marginBottom: '14px',
+                  position: 'absolute',
+                  top: '-6px',
+                  left: '18px',
+                  width: '11px',
+                  height: '11px',
+                  borderRadius: '50%',
+                  background: C.archiveGreen,
+                  boxShadow: '0 2px 3px rgba(28,27,25,0.35)',
+                  transition: 'background 200ms ease',
                 }}
+              />
+
+              <div
+                style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}
               >
-                <Icon size={17} color={C.archiveGreen} aria-hidden />
+                <span
+                  data-role="icon-glyph"
+                  style={{
+                    display: 'inline-flex',
+                    flexShrink: 0,
+                    color: C.archiveGreen,
+                    transition: 'color 200ms ease',
+                  }}
+                >
+                  <Icon size={16} color="currentColor" aria-hidden />
+                </span>
+                <h3
+                  className="font-display"
+                  style={{
+                    fontSize: '15px',
+                    fontWeight: 700,
+                    fontStyle: 'italic',
+                    color: C.inkBase,
+                    lineHeight: 1.25,
+                  }}
+                >
+                  {item.title}
+                </h3>
               </div>
-              <h3
-                className="font-display"
-                style={{
-                  fontSize: '17px',
-                  fontWeight: 700,
-                  fontStyle: 'italic',
-                  color: C.inkBase,
-                  marginBottom: '8px',
-                  lineHeight: 1.3,
-                }}
-              >
-                {item.title}
-              </h3>
               <p
                 style={{
                   fontFamily: FONT_BODY,
-                  fontSize: '13.5px',
+                  fontSize: '12.5px',
                   color: C.inkSecondary,
-                  lineHeight: 1.6,
+                  lineHeight: 1.55,
                 }}
               >
                 {item.body}
               </p>
+              <span
+                aria-hidden="true"
+                style={{
+                  display: 'block',
+                  marginTop: '10px',
+                  fontFamily: FONT_MONO,
+                  fontSize: '9.5px',
+                  color: C.inkHint,
+                  letterSpacing: '0.08em',
+                }}
+              >
+                FILE No. {String(index + 1).padStart(2, '0')}
+              </span>
             </div>
           );
         })}
