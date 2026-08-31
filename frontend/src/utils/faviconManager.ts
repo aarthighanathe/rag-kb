@@ -87,6 +87,13 @@ function pulseLoop(): void {
 function startPulse(): void {
   if (animationFrame !== null) return;
   pulsePhase = 0;
+  // Drawing before baseImage has loaded would animate a blank favicon with
+  // only the pulsing dot, no book icon — wait for the same `load` event
+  // drawStateFavicon relies on before starting the per-frame draw loop.
+  if (baseImage && !baseImage.complete) {
+    baseImage.addEventListener('load', pulseLoop, { once: true });
+    return;
+  }
   pulseLoop();
 }
 
@@ -115,8 +122,39 @@ export function initFavicon(): void {
 }
 
 /**
+ * Restores the favicon link's href to the original static asset it had
+ * before any canvas-drawn state overlay was applied.
+ */
+function restoreOriginalFavicon(): void {
+  const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement | null;
+  if (link && originalHref) {
+    link.href = originalHref;
+  }
+}
+
+/**
+ * Draws and applies a state-overlay favicon once the base image has finished
+ * loading. If it's already loaded, draws immediately; otherwise waits for
+ * its `load` event — drawing an incomplete image onto the canvas silently
+ * produces a blank favicon with only the status dot, no book icon, which is
+ * indistinguishable from a broken favicon in the browser tab.
+ * @param state - Status to render as the overlay dot
+ * @param alpha - Dot opacity, used by the processing pulse animation
+ */
+function drawStateFavicon(state: FaviconState, alpha = 1): void {
+  if (baseImage && !baseImage.complete) {
+    baseImage.addEventListener('load', () => setFavicon(generateFavicon(state, alpha)), {
+      once: true,
+    });
+    return;
+  }
+  setFavicon(generateFavicon(state, alpha));
+}
+
+/**
  * Sets the favicon to reflect the given processing state.
- * - idle: muted gray dot
+ * - idle: no upload activity — restores the plain static favicon rather than
+ *   redrawing a canvas copy of it, since there's nothing to signal
  * - processing: amber pulsing dot
  * - ready: green dot
  * - error: red dot
@@ -124,9 +162,11 @@ export function initFavicon(): void {
 export function setFaviconState(state: FaviconState): void {
   stopPulse();
 
-  if (state === 'processing') {
+  if (state === 'idle') {
+    restoreOriginalFavicon();
+  } else if (state === 'processing') {
     startPulse();
   } else {
-    setFavicon(generateFavicon(state));
+    drawStateFavicon(state);
   }
 }
