@@ -26,10 +26,10 @@ let pulsePhase = 0;
 // ---------------------------------------------------------------------------
 
 const STATE_COLORS: Record<FaviconState, string> = {
-  idle:     '#B8B4AC',
+  idle: '#B8B4AC',
   processing: '#D68910',
-  ready:    '#2D5A4A',
-  error:    '#FF4D2E',
+  ready: '#2D5A4A',
+  error: '#FF4D2E',
 };
 
 const DOT_RADIUS = 4;
@@ -128,16 +128,5 @@ export function setFaviconState(state: FaviconState): void {
     startPulse();
   } else {
     setFavicon(generateFavicon(state));
-  }
-}
-
-/**
- * Resets the favicon to its original state (no dot).
- */
-export function resetFavicon(): void {
-  stopPulse();
-  const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement | null;
-  if (link && originalHref) {
-    link.href = originalHref;
   }
 }

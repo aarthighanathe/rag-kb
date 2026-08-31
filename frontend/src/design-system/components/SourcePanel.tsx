@@ -23,7 +23,17 @@ export interface SourcePanelProps {
   queryPhase: 'idle' | 'searching' | 'streaming' | 'complete';
 }
 
-function toChatCitation(c: Citation, i: number): ChatCitation {
+/**
+ * Converts a store Citation into the ChatCitation shape rendered by
+ * IndexCard/ConfidenceBar/RelevanceTimeline below, additionally stamping a
+ * 1-based `chunkIndex` from array position (used for export formatting) —
+ * distinct from the module-level `toChatCitation` in
+ * `src/utils/chatCitations.ts`, which has no index parameter.
+ * @param c - Citation as stored in the RAG store
+ * @param i - Zero-based position in the liveChunks array
+ * @returns Equivalent ChatCitation for rendering, with chunkIndex set
+ */
+function toChatCitationWithIndex(c: Citation, i: number): ChatCitation {
   return {
     id: c.chunkId,
     documentName: c.documentName,
@@ -31,6 +41,7 @@ function toChatCitation(c: Citation, i: number): ChatCitation {
     relevanceScore: c.similarity,
     fullText: c.excerpt,
     chunkIndex: i + 1,
+    citationNumber: c.citationNumber,
   };
 }
 
@@ -215,13 +226,13 @@ export function SourcePanel({ liveChunks, queryPhase }: SourcePanelProps): React
                   documentName={chunk.documentName}
                   chunkText={chunk.excerpt}
                   relevanceScore={chunk.similarity}
-                  chunkRef={`Chunk ${i + 1}`}
+                  chunkRef={`Chunk ${chunk.citationNumber}`}
                   index={i}
-                  citationIndex={i + 1}
-                  isActive={activeCitation === i + 1}
+                  citationIndex={chunk.citationNumber}
+                  isActive={activeCitation === chunk.citationNumber}
                   onEnter={handleCardEnter}
                   onLeave={handleCardLeave}
-                  cardRef={(el) => cardRefs.current.set(i + 1, el)}
+                  cardRef={(el) => cardRefs.current.set(chunk.citationNumber, el)}
                   className="w-full"
                 />
               </div>
@@ -230,7 +241,7 @@ export function SourcePanel({ liveChunks, queryPhase }: SourcePanelProps): React
 
           {/* RelevanceTimeline */}
           <RelevanceTimeline
-            citations={liveChunks.map((c, i) => toChatCitation(c, i))}
+            citations={liveChunks.map((c, i) => toChatCitationWithIndex(c, i))}
             isStreaming={queryPhase === 'streaming'}
           />
         </>

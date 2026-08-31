@@ -291,6 +291,7 @@ describe('safeParseCitations', () => {
     chunkId: 'chunk-1',
     similarity: 0.9,
     excerpt: 'Some excerpt text.',
+    citationNumber: 1,
   };
 
   it('returns an empty array for non-array input', () => {

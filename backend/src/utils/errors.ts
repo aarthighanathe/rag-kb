@@ -23,6 +23,7 @@ export enum EmbeddingErrorCode {
   BATCH_TOO_LARGE = 'EMBEDDING_BATCH_TOO_LARGE',
   EMPTY_INPUT = 'EMBEDDING_EMPTY_INPUT',
   MAX_RETRIES_EXCEEDED = 'EMBEDDING_MAX_RETRIES_EXCEEDED',
+  COUNT_MISMATCH = 'EMBEDDING_COUNT_MISMATCH',
 }
 
 export enum VectorStoreErrorCode {
@@ -39,6 +40,8 @@ export enum LLMErrorCode {
   CONTEXT_TOO_LONG = 'LLM_CONTEXT_TOO_LONG',
   MODEL_UNAVAILABLE = 'LLM_MODEL_UNAVAILABLE',
   INVALID_RESPONSE = 'LLM_INVALID_RESPONSE',
+  AUTH_FAILED = 'LLM_AUTH_FAILED',
+  RATE_LIMITED = 'LLM_RATE_LIMITED',
 }
 
 export enum FileValidationErrorCode {
@@ -79,8 +82,12 @@ export enum QueueErrorCode {
  * directly — each pipeline layer gets a thin named subclass below so
  * `instanceof ChunkingError` etc. and `err.name` keep working exactly as
  * before, while `TCode` narrows `err.code` to that layer's specific enum.
+ * `this.name` is derived from `new.target.name` (the concrete subclass
+ * actually being constructed) rather than a string literal passed by each
+ * subclass, so a subclass rename can never silently desync `err.name` from
+ * the class name — `new.target` is available before any field is set,
+ * unlike `this.constructor.name` in some transpilation targets.
  * @param message - Human-readable description
- * @param name - Concrete subclass name, assigned to `this.name`
  * @param code - Machine-readable code from the subclass's error-code enum
  * @param statusCode - HTTP status code
  * @param originalError - Upstream error that caused this, if any
@@ -90,9 +97,9 @@ abstract class DomainError<TCode extends string> extends AppError {
   // exactOptionalPropertyTypes: explicit undefined union required when value can be absent
   public readonly originalError?: Error | undefined;
 
-  constructor(message: string, name: string, code: TCode, statusCode: number, originalError?: Error) {
+  constructor(message: string, code: TCode, statusCode: number, originalError?: Error) {
     super(message, statusCode);
-    this.name = name;
+    this.name = new.target.name;
     this.code = code;
     this.originalError = originalError;
     Error.captureStackTrace(this, this.constructor);
@@ -108,7 +115,7 @@ abstract class DomainError<TCode extends string> extends AppError {
  */
 export class ChunkingError extends DomainError<ChunkingErrorCode> {
   constructor(message: string, code: ChunkingErrorCode, statusCode = 422, originalError?: Error) {
-    super(message, 'ChunkingError', code, statusCode, originalError);
+    super(message, code, statusCode, originalError);
   }
 }
 
@@ -121,7 +128,7 @@ export class ChunkingError extends DomainError<ChunkingErrorCode> {
  */
 export class EmbeddingError extends DomainError<EmbeddingErrorCode> {
   constructor(message: string, code: EmbeddingErrorCode, statusCode = 503, originalError?: Error) {
-    super(message, 'EmbeddingError', code, statusCode, originalError);
+    super(message, code, statusCode, originalError);
   }
 }
 
@@ -139,7 +146,7 @@ export class VectorStoreError extends DomainError<VectorStoreErrorCode> {
     statusCode = 500,
     originalError?: Error,
   ) {
-    super(message, 'VectorStoreError', code, statusCode, originalError);
+    super(message, code, statusCode, originalError);
   }
 }
 
@@ -152,7 +159,7 @@ export class VectorStoreError extends DomainError<VectorStoreErrorCode> {
  */
 export class LLMError extends DomainError<LLMErrorCode> {
   constructor(message: string, code: LLMErrorCode, statusCode = 503, originalError?: Error) {
-    super(message, 'LLMError', code, statusCode, originalError);
+    super(message, code, statusCode, originalError);
   }
 }
 
@@ -170,7 +177,7 @@ export class FileValidationError extends DomainError<FileValidationErrorCode> {
     statusCode = 400,
     originalError?: Error,
   ) {
-    super(message, 'FileValidationError', code, statusCode, originalError);
+    super(message, code, statusCode, originalError);
   }
 }
 
@@ -183,6 +190,6 @@ export class FileValidationError extends DomainError<FileValidationErrorCode> {
  */
 export class QueueError extends DomainError<QueueErrorCode> {
   constructor(message: string, code: QueueErrorCode, statusCode = 500, originalError?: Error) {
-    super(message, 'QueueError', code, statusCode, originalError);
+    super(message, code, statusCode, originalError);
   }
 }

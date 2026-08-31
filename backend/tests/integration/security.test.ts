@@ -355,15 +355,15 @@ describe('Rate limit threshold enforcement', () => {
 
   it('returns 429 after exceeding the upload rate limit', async () => {
     // First two requests succeed (limit = 2)
-    await supertest(rateLimitApp)
+    await authedRequest(rateLimitApp)
       .post('/api/upload')
       .attach('files', TXT_BUFFER, { filename: 'a.txt', contentType: 'text/plain' });
-    await supertest(rateLimitApp)
+    await authedRequest(rateLimitApp)
       .post('/api/upload')
       .attach('files', TXT_BUFFER, { filename: 'b.txt', contentType: 'text/plain' });
 
     // Third request must be rate-limited
-    const res = await supertest(rateLimitApp)
+    const res = await authedRequest(rateLimitApp)
       .post('/api/upload')
       .attach('files', TXT_BUFFER, { filename: 'c.txt', contentType: 'text/plain' });
 
@@ -372,7 +372,7 @@ describe('Rate limit threshold enforcement', () => {
 
   it('429 response includes Retry-After header', async () => {
     // Exhaust the limit (already used 2 slots above — window is still active)
-    const res = await supertest(rateLimitApp)
+    const res = await authedRequest(rateLimitApp)
       .post('/api/upload')
       .attach('files', TXT_BUFFER, { filename: 'd.txt', contentType: 'text/plain' });
 
@@ -386,7 +386,7 @@ describe('Rate limit threshold enforcement', () => {
 
   it('429 response body matches the standard error envelope', async () => {
     // Force another 429 by sending one more upload
-    const res = await supertest(rateLimitApp)
+    const res = await authedRequest(rateLimitApp)
       .post('/api/upload')
       .attach('files', TXT_BUFFER, { filename: 'e.txt', contentType: 'text/plain' });
 

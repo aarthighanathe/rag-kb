@@ -46,6 +46,7 @@ const makeChunks = (...names: string[]): Citation[] =>
     chunkRef: `Chunk ${i + 1}`,
     similarity: 0.9 - i * 0.1,
     excerpt: `Excerpt from ${name}`,
+    citationNumber: i + 1,
   }));
 
 describe('SourcePanel', () => {

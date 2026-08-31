@@ -64,33 +64,3 @@ export function validate<T>(
     next();
   };
 }
-
-/**
- * Validates req.body against the given Zod schema.
- * Convenience wrapper around {@link validate} for the common body-validation case.
- * @param schema - Zod schema to validate against
- * @returns Express middleware function
- */
-export function validateBody<T>(schema: ZodType<T, ZodTypeDef, unknown>): RequestHandler {
-  return validate(schema, 'body');
-}
-
-/**
- * Validates req.query against the given Zod schema.
- * Use for GET/DELETE endpoints that carry parameters in the query string.
- * @param schema - Zod schema to validate against
- * @returns Express middleware function
- */
-export function validateQuery<T>(schema: ZodType<T, ZodTypeDef, unknown>): RequestHandler {
-  return validate(schema, 'query');
-}
-
-/**
- * Validates req.params against the given Zod schema.
- * Use for route parameters like :id that must conform to a known shape.
- * @param schema - Zod schema to validate against
- * @returns Express middleware function
- */
-export function validateParams<T>(schema: ZodType<T, ZodTypeDef, unknown>): RequestHandler {
-  return validate(schema, 'params');
-}

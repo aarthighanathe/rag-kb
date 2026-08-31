@@ -41,8 +41,13 @@ describe('extractErrorMessage', () => {
     expect(extractErrorMessage(err)).toMatch(/could not reach the server/i);
   });
 
+  it("shows a timeout message when apiFetch's default request timeout fires", () => {
+    const err = new DOMException('signal timed out', 'TimeoutError');
+    expect(extractErrorMessage(err)).toMatch(/took too long/i);
+  });
+
   it('falls back to the generic message for a plain client-side Error', () => {
-    const err = new Error('Cannot read properties of undefined (reading \'foo\')');
+    const err = new Error("Cannot read properties of undefined (reading 'foo')");
     expect(extractErrorMessage(err, 'Upload failed')).toBe('Upload failed');
   });
 
@@ -51,15 +56,15 @@ describe('extractErrorMessage', () => {
   });
 
   it('falls back to the generic message for a thrown plain object', () => {
-    expect(extractErrorMessage({ message: 'looks like an error but is not' }, 'Upload failed')).toBe(
-      'Upload failed',
-    );
+    expect(
+      extractErrorMessage({ message: 'looks like an error but is not' }, 'Upload failed'),
+    ).toBe('Upload failed');
   });
 
   it('falls back to the generic message for a thrown API-envelope-shaped object that never went through fetch', () => {
-    expect(
-      extractErrorMessage({ error: { message: 'spoofed', code: 'X' } }, 'Upload failed'),
-    ).toBe('Upload failed');
+    expect(extractErrorMessage({ error: { message: 'spoofed', code: 'X' } }, 'Upload failed')).toBe(
+      'Upload failed',
+    );
   });
 
   it('falls back to the default fallback message when none is provided', () => {

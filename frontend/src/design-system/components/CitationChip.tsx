@@ -58,7 +58,9 @@ export function CitationChip({
 }: CitationChipProps): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const [showConnector, setShowConnector] = useState(false);
-  const pct = Math.round(relevanceScore * 100);
+  // Clamp to [0, 100] — a slightly out-of-range similarity score must never
+  // render an invalid aria-valuenow or a confusing "102%"/"-1%" display.
+  const pct = Math.min(100, Math.max(0, Math.round(relevanceScore * 100)));
   const panelId = `citation-panel-${index}`;
   const num = index + 1;
   const panelRef = useRef<HTMLDivElement>(null);

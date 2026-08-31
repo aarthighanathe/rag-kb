@@ -22,6 +22,7 @@
  */
 
 import rateLimit, { type RateLimitRequestHandler } from 'express-rate-limit';
+import type { Request } from 'express';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 
@@ -32,18 +33,35 @@ const RATE_LIMIT_ERROR_CODE = 'RATE_LIMIT_EXCEEDED';
 // ─── Factory ──────────────────────────────────────────────────────────────────
 
 /**
- * Creates a rate limiter with per-IP keying, structured logging, and a consistent
- * error envelope that matches the rest of the API (success/error/correlationId).
+ * Keys by the authenticated user's Clerk ID when available, falling back to
+ * IP otherwise. Only meaningful for limiters mounted *after* requireAuth in
+ * app.ts — otherwise req.auth is never set and this always falls back to IP.
+ * Keying by user (not just IP) prevents users behind a shared NAT/VPN from
+ * sharing one bucket, and prevents a single user rotating IPs from getting a
+ * fresh bucket each time.
+ * @param req - Incoming request, possibly already authenticated
+ * @returns The bucket key for this request
+ */
+function keyByUserOrIp(req: Request): string {
+  return req.auth?.userId ?? req.ip ?? 'unknown';
+}
+
+/**
+ * Creates a rate limiter with structured logging and a consistent error
+ * envelope that matches the rest of the API (success/error/correlationId).
  *
  * @param max - Maximum requests allowed in the window
  * @param windowMs - Rolling time window in milliseconds
  * @param humanMessage - Human-readable message returned on 429
+ * @param keyGenerator - How to bucket requests; defaults to IP-only for
+ *   limiters mounted before requireAuth (req.auth doesn't exist yet there)
  * @returns Configured express-rate-limit middleware
  */
 function createLimiter(
   max: number,
   windowMs: number,
   humanMessage: string,
+  keyGenerator: (req: Request) => string = (req) => req.ip ?? 'unknown',
 ): RateLimitRequestHandler {
   return rateLimit({
     windowMs,
@@ -74,9 +92,7 @@ function createLimiter(
         correlationId: req.correlationId ?? 'unknown',
       });
     },
-    // Key by IP.  When authentication is added, append user ID here so authenticated
-    // users get their own quota rather than sharing the IP-level bucket.
-    keyGenerator: (req) => req.ip ?? 'unknown',
+    keyGenerator,
   });
 }
 
@@ -101,6 +117,7 @@ export const uploadRateLimit = createLimiter(
   env.RATE_LIMIT_MAX_UPLOAD,
   env.RATE_LIMIT_WINDOW_MS,
   `Upload limit: max ${env.RATE_LIMIT_MAX_UPLOAD} uploads per ${env.RATE_LIMIT_WINDOW_MS / 1000}s.`,
+  keyByUserOrIp,
 );
 
 /**
@@ -123,6 +140,7 @@ export const documentsRateLimit = createLimiter(
   env.RATE_LIMIT_MAX_DOCUMENTS,
   env.RATE_LIMIT_WINDOW_MS,
   `Document API limit: max ${env.RATE_LIMIT_MAX_DOCUMENTS} requests per ${env.RATE_LIMIT_WINDOW_MS / 1000}s.`,
+  keyByUserOrIp,
 );
 
 /**

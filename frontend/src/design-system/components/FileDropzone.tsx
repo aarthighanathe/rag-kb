@@ -10,6 +10,7 @@
 import React, { useCallback, useRef } from 'react';
 import { Upload, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { LoadingSpinner } from './LoadingSpinner';
+import { fmtBytes as formatBytes } from '../../utils/documentFormatters';
 
 export interface FileEntry {
   /** Unique identifier for this file in the list. */
@@ -40,12 +41,6 @@ export interface FileDropzoneProps {
   /** When true, the entire zone is non-interactive. */
   disabled?: boolean;
 }
-
-const formatBytes = (bytes: number): string => {
-  if (bytes < 1024)    return `${bytes} B`;
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1048576).toFixed(1)} MB`;
-};
 
 /**
  * Drag-and-drop + click-to-open file upload zone — paper aesthetic.
@@ -103,13 +98,16 @@ export function FileDropzone({
     [getFileError, onFiles],
   );
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    if (!disabled) {
-      setIsDragOver(true);
-      setAnnouncement('Files detected — release to upload');
-    }
-  }, [disabled]);
+  const handleDragOver = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      if (!disabled) {
+        setIsDragOver(true);
+        setAnnouncement('Files detected — release to upload');
+      }
+    },
+    [disabled],
+  );
 
   const handleDragLeave = useCallback(() => {
     setIsDragOver(false);
@@ -156,10 +154,7 @@ export function FileDropzone({
     p-ds-12 rounded-[2px] cursor-pointer
     transition-all duration-ds-normal ease-ds-smooth
     focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ds-stamp focus-visible:ring-offset-2 focus-visible:ring-offset-ds-base
-    ${isDragOver
-      ? 'bg-ds-stamp/5 scale-[1.01] shadow-ds-lifted'
-      : 'bg-ds-surface hover:bg-ds-base'
-    }
+    ${isDragOver ? 'bg-ds-stamp/5 scale-[1.01] shadow-ds-lifted' : 'bg-ds-surface hover:bg-ds-base'}
     ${disabled ? 'opacity-50 cursor-not-allowed' : ''}
   `;
 
@@ -170,7 +165,9 @@ export function FileDropzone({
       </div>
 
       {/* Hidden label — aria-labelledby overrides aria-label for computed accessible name */}
-      <span id="dropzone-btn-label" className="sr-only">Drag, drop or select files to upload</span>
+      <span id="dropzone-btn-label" className="sr-only">
+        Drag, drop or select files to upload
+      </span>
 
       {/* Drop zone with hand-drawn SVG border */}
       <div
@@ -248,14 +245,23 @@ export function FileDropzone({
               aria-label={`${file.name}: ${file.status}${file.status === 'uploading' ? ` ${file.progress}%` : ''}`}
             >
               {file.status === 'uploading' && <LoadingSpinner size="sm" />}
-              {file.status === 'done'      && <CheckCircle size={15} className="text-ds-archive shrink-0" aria-hidden="true" />}
-              {file.status === 'error'     && <AlertCircle size={15} className="text-ds-error  shrink-0" aria-hidden="true" />}
-              {file.status === 'pending'   && (
-                <span className="h-3.5 w-3.5 rounded-none border border-ds-hairline shrink-0" aria-hidden="true" />
+              {file.status === 'done' && (
+                <CheckCircle size={15} className="text-ds-archive shrink-0" aria-hidden="true" />
+              )}
+              {file.status === 'error' && (
+                <AlertCircle size={15} className="text-ds-error  shrink-0" aria-hidden="true" />
+              )}
+              {file.status === 'pending' && (
+                <span
+                  className="h-3.5 w-3.5 rounded-none border border-ds-hairline shrink-0"
+                  aria-hidden="true"
+                />
               )}
 
               <div className="flex-1 min-w-0">
-                <p className="text-ds-sm font-body font-medium text-ds-text-primary truncate">{file.name}</p>
+                <p className="text-ds-sm font-body font-medium text-ds-text-primary truncate">
+                  {file.name}
+                </p>
 
                 {file.status === 'uploading' && (
                   <div
@@ -274,7 +280,9 @@ export function FileDropzone({
                 )}
 
                 {file.status === 'error' && file.error && (
-                  <p data-testid="file-error" className="text-ds-xs text-ds-error font-body mt-0.5">{file.error}</p>
+                  <p data-testid="file-error" className="text-ds-xs text-ds-error font-body mt-0.5">
+                    {file.error}
+                  </p>
                 )}
               </div>
 

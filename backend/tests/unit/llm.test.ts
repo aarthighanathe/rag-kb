@@ -9,12 +9,27 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ─── Hoisted mocks ────────────────────────────────────────────────────────────
 
-const { mockCreate } = vi.hoisted(() => ({ mockCreate: vi.fn() }));
+const { mockCreate, MockAPIError } = vi.hoisted(() => {
+  const mockCreate = vi.fn();
+  // Mirrors groq-sdk's real APIError shape closely enough for `instanceof`
+  // checks and `.status`/`.error` access in llm.ts's error classification.
+  class MockAPIError extends Error {
+    status: number;
+    error: unknown;
+    constructor(status: number, error: unknown, message?: string) {
+      super(message ?? `${status} error`);
+      this.status = status;
+      this.error = error;
+    }
+  }
+  return { mockCreate, MockAPIError };
+});
 
 vi.mock('groq-sdk', () => ({
   default: class MockGroq {
     chat = { completions: { create: mockCreate } };
   },
+  APIError: MockAPIError,
 }));
 
 vi.mock('../../src/utils/logger', () => ({
@@ -306,17 +321,117 @@ describe('streamAnswer', () => {
     expect(err.code).toBe(LLMErrorCode.STREAM_FAILED);
   });
 
-  it('passes temperature from RAGContext to Groq create call', async () => {
+  it('classifies a 401 Groq APIError as AUTH_FAILED (not a generic 503)', async () => {
+    mockCreate.mockRejectedValue(new MockAPIError(401, { message: 'Invalid API Key' }));
+
+    const onError = vi.fn();
+    await expect(
+      streamAnswer({ chunks: [makeChunk()], query: 'test' }, [], {
+        onChunk: vi.fn(),
+        onComplete: vi.fn(),
+        onError,
+      }),
+    ).rejects.toBeInstanceOf(LLMError);
+
+    const err = onError.mock.calls[0]?.[0] as LLMError;
+    expect(err.code).toBe(LLMErrorCode.AUTH_FAILED);
+    expect(err.statusCode).toBe(401);
+  });
+
+  it('classifies a 429 Groq APIError as RATE_LIMITED', async () => {
+    mockCreate.mockRejectedValue(new MockAPIError(429, { message: 'Rate limit exceeded' }));
+
+    const onError = vi.fn();
+    await expect(
+      streamAnswer({ chunks: [makeChunk()], query: 'test' }, [], {
+        onChunk: vi.fn(),
+        onComplete: vi.fn(),
+        onError,
+      }),
+    ).rejects.toBeInstanceOf(LLMError);
+
+    const err = onError.mock.calls[0]?.[0] as LLMError;
+    expect(err.code).toBe(LLMErrorCode.RATE_LIMITED);
+    expect(err.statusCode).toBe(429);
+  });
+
+  it('classifies a 404 Groq APIError as MODEL_UNAVAILABLE (e.g. a deprecated/renamed model ID)', async () => {
+    mockCreate.mockRejectedValue(new MockAPIError(404, { message: 'model not found' }));
+
+    const onError = vi.fn();
+    await expect(
+      streamAnswer({ chunks: [makeChunk()], query: 'test' }, [], {
+        onChunk: vi.fn(),
+        onComplete: vi.fn(),
+        onError,
+      }),
+    ).rejects.toBeInstanceOf(LLMError);
+
+    const err = onError.mock.calls[0]?.[0] as LLMError;
+    expect(err.code).toBe(LLMErrorCode.MODEL_UNAVAILABLE);
+  });
+
+  it('classifies a 400 Groq APIError with a context-length error code as CONTEXT_TOO_LONG', async () => {
+    mockCreate.mockRejectedValue(
+      new MockAPIError(400, { code: 'context_length_exceeded', message: 'too many tokens' }),
+    );
+
+    const onError = vi.fn();
+    await expect(
+      streamAnswer({ chunks: [makeChunk()], query: 'test' }, [], {
+        onChunk: vi.fn(),
+        onComplete: vi.fn(),
+        onError,
+      }),
+    ).rejects.toBeInstanceOf(LLMError);
+
+    const err = onError.mock.calls[0]?.[0] as LLMError;
+    expect(err.code).toBe(LLMErrorCode.CONTEXT_TOO_LONG);
+  });
+
+  it('classifies a generic 400 Groq APIError as INVALID_RESPONSE', async () => {
+    mockCreate.mockRejectedValue(new MockAPIError(400, { message: 'bad request' }));
+
+    const onError = vi.fn();
+    await expect(
+      streamAnswer({ chunks: [makeChunk()], query: 'test' }, [], {
+        onChunk: vi.fn(),
+        onComplete: vi.fn(),
+        onError,
+      }),
+    ).rejects.toBeInstanceOf(LLMError);
+
+    const err = onError.mock.calls[0]?.[0] as LLMError;
+    expect(err.code).toBe(LLMErrorCode.INVALID_RESPONSE);
+  });
+
+  it('falls back to STREAM_FAILED for a Groq APIError with an unrecognized status', async () => {
+    mockCreate.mockRejectedValue(new MockAPIError(502, { message: 'bad gateway' }));
+
+    const onError = vi.fn();
+    await expect(
+      streamAnswer({ chunks: [makeChunk()], query: 'test' }, [], {
+        onChunk: vi.fn(),
+        onComplete: vi.fn(),
+        onError,
+      }),
+    ).rejects.toBeInstanceOf(LLMError);
+
+    const err = onError.mock.calls[0]?.[0] as LLMError;
+    expect(err.code).toBe(LLMErrorCode.STREAM_FAILED);
+  });
+
+  it('always uses the default temperature for the Groq create call', async () => {
     mockCreate.mockResolvedValue(makeTokenStream([]));
 
     await streamAnswer(
-      { chunks: [makeChunk()], query: 'test', temperature: 0.5 },
+      { chunks: [makeChunk()], query: 'test' },
       [],
       { onChunk: vi.fn(), onComplete: vi.fn(), onError: vi.fn() },
     );
 
     const callArgs = mockCreate.mock.calls[0]?.[0] as { temperature: number };
-    expect(callArgs.temperature).toBe(0.5);
+    expect(callArgs.temperature).toBe(0.1);
   });
 
   it('includes history content in the Groq call when provided, without an assistant-role turn', async () => {
@@ -432,9 +547,9 @@ describe('extractCitedIndices', () => {
 
 describe('filterCitationsByModelOutput', () => {
   const citations = [
-    { documentId: 'd1', filename: 'a.pdf', chunkId: 'c1', similarity: 0.3, excerpt: 'A' },
-    { documentId: 'd2', filename: 'b.pdf', chunkId: 'c2', similarity: 0.2, excerpt: 'B' },
-    { documentId: 'd3', filename: 'c.pdf', chunkId: 'c3', similarity: 0.1, excerpt: 'C' },
+    { documentId: 'd1', filename: 'a.pdf', chunkId: 'c1', similarity: 0.3, excerpt: 'A', citationNumber: 1 },
+    { documentId: 'd2', filename: 'b.pdf', chunkId: 'c2', similarity: 0.2, excerpt: 'B', citationNumber: 2 },
+    { documentId: 'd3', filename: 'c.pdf', chunkId: 'c3', similarity: 0.1, excerpt: 'C', citationNumber: 3 },
   ];
 
   it('keeps only citations the model actually referenced', () => {

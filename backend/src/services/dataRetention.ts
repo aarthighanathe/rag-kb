@@ -13,6 +13,7 @@
 
 import { logger } from '../utils/logger.js';
 import { getClient } from './vectorStore.js';
+import { listStagedFiles, removeFile } from './storage.js';
 
 // ─── Retention Periods (in days) ───────────────────────────────────────────────
 
@@ -27,64 +28,6 @@ export const RETENTION_POLICIES = {
     standard: 730, // Audit logs retained for 2 years
   },
 } as const;
-
-/** Data type categories this service can report on / clean up. */
-export enum DataType {
-  QUERY = 'query',
-  AUDIT_LOG = 'audit_log',
-}
-
-/** Retention status for a data record. */
-export interface RetentionStatus {
-  dataType: DataType;
-  isRetained: boolean;
-  expiresAt?: Date;
-  reason: string;
-}
-
-// ─── Retention Calculation ─────────────────────────────────────────────────────
-
-/**
- * Resolves the retention period (in days) for a data record, dispatching by data type.
- * @param dataType - The type of data
- * @returns Retention period in days
- */
-function resolveRetentionDays(dataType: DataType): number {
-  return dataType === DataType.AUDIT_LOG
-    ? RETENTION_POLICIES.auditLogs.standard
-    : RETENTION_POLICIES.queries.standard;
-}
-
-/**
- * Calculates the expiration date for a data record based on its type and creation date.
- * @param dataType - The type of data
- * @param createdAt - When the record was created
- * @returns Expiration date
- */
-export function calculateExpirationDate(dataType: DataType, createdAt: Date): Date {
-  const retentionDays = resolveRetentionDays(dataType);
-  const expiresAt = new Date(createdAt);
-  expiresAt.setDate(expiresAt.getDate() + retentionDays);
-  return expiresAt;
-}
-
-/**
- * Checks if a data record should still be retained.
- * @param dataType - The type of data
- * @param createdAt - When the record was created
- * @returns Retention status
- */
-export function checkRetentionStatus(dataType: DataType, createdAt: Date): RetentionStatus {
-  const expiresAt = calculateExpirationDate(dataType, createdAt);
-  const isRetained = new Date() < expiresAt;
-
-  return {
-    dataType,
-    isRetained,
-    expiresAt,
-    reason: isRetained ? `Retained until ${expiresAt.toISOString()}` : 'Retention period expired',
-  };
-}
 
 // ─── Cleanup Functions ────────────────────────────────────────────────────────
 
@@ -153,24 +96,107 @@ export async function cleanupExpiredAuditLogs(): Promise<number> {
 }
 
 /**
+ * Grace period before an orphaned staging-bucket file is eligible for
+ * removal. Must be long enough that a file mid-upload (staged, but its
+ * `documents` row or BullMQ enqueue hasn't committed yet) is never mistaken
+ * for an orphan — upload.ts's own rollback already handles that failure mode
+ * synchronously; this only catches files left behind by a harder failure
+ * (e.g. a process crash between uploadFile() and createDocument()) that no
+ * in-request rollback could run for.
+ */
+const ORPHAN_STORAGE_GRACE_PERIOD_MS = 60 * 60 * 1000; // 1 hour
+
+/** Storage keys are `{documentId}_{sanitizedName}` — documentId is always a UUID v4 (see routes/upload.ts). */
+const STORAGE_KEY_DOCUMENT_ID_PATTERN =
+  /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_/i;
+
+/**
+ * Deletes staging-bucket files with no matching `documents` row — the result
+ * of a crash between the file being staged (storage.ts's uploadFile) and the
+ * `documents` row being created, a window upload.ts's own in-request
+ * rollback cannot cover since the process is gone by the time it would run.
+ * Left over indefinitely, these accumulate as unbounded Supabase Storage
+ * cost with nothing referencing them.
+ * @returns Number of orphaned files removed
+ */
+export async function reconcileOrphanedStorageFiles(): Promise<number> {
+  try {
+    const staged = await listStagedFiles();
+    if (staged.length === 0) return 0;
+
+    const cutoff = Date.now() - ORPHAN_STORAGE_GRACE_PERIOD_MS;
+    const candidates = staged.filter((file) => new Date(file.createdAt).getTime() < cutoff);
+    if (candidates.length === 0) return 0;
+
+    const documentIds = candidates
+      .map((file) => STORAGE_KEY_DOCUMENT_ID_PATTERN.exec(file.name)?.[1])
+      .filter((id): id is string => id !== undefined);
+
+    const { data: existing, error } = await getClient()
+      .from('documents')
+      .select('id')
+      .in('id', documentIds);
+
+    if (error) {
+      logger.error('Failed to check documents table during storage reconciliation', {
+        error: error.message,
+      });
+      return 0;
+    }
+
+    const existingIds = new Set((existing ?? []).map((row: { id: string }) => row.id));
+    const orphans = candidates.filter((file) => {
+      const id = STORAGE_KEY_DOCUMENT_ID_PATTERN.exec(file.name)?.[1];
+      // No parseable documentId prefix at all is itself orphan-shaped (not a
+      // key this app's upload pipeline could have produced), but is left
+      // alone rather than deleted — a conservative default in case something
+      // else ever legitimately writes to this bucket.
+      return id !== undefined && !existingIds.has(id);
+    });
+
+    await Promise.all(orphans.map((file) => removeFile(file.name)));
+
+    if (orphans.length > 0) {
+      logger.warn('Removed orphaned storage files with no matching documents row', {
+        count: orphans.length,
+        keys: orphans.map((f) => f.name),
+      });
+    }
+    return orphans.length;
+  } catch (error) {
+    logger.error('Error during orphaned storage file reconciliation', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return 0;
+  }
+}
+
+/**
  * Runs all cleanup tasks.
  * @returns Summary of cleanup results
  */
 export async function runAllCleanupTasks(): Promise<{
   queries: number;
   auditLogs: number;
+  orphanedStorageFiles: number;
   total: number;
 }> {
   logger.info('Starting data retention cleanup');
 
-  const [queries, auditLogs] = await Promise.all([
+  const [queries, auditLogs, orphanedStorageFiles] = await Promise.all([
     cleanupExpiredQueries(),
     cleanupExpiredAuditLogs(),
+    reconcileOrphanedStorageFiles(),
   ]);
-  const total = queries + auditLogs;
+  const total = queries + auditLogs + orphanedStorageFiles;
 
-  logger.info('Data retention cleanup completed', { queries, auditLogs, total });
-  return { queries, auditLogs, total };
+  logger.info('Data retention cleanup completed', {
+    queries,
+    auditLogs,
+    orphanedStorageFiles,
+    total,
+  });
+  return { queries, auditLogs, orphanedStorageFiles, total };
 }
 
 /**

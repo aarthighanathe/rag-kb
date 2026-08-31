@@ -8,7 +8,12 @@
  */
 
 import { z } from 'zod';
-import { formatUserFacingError, isBackendUnreachable } from '../utils/formatError';
+import {
+  formatUserFacingError,
+  isBackendUnreachable,
+  isRequestTimeout,
+  REQUEST_TIMEOUT_MESSAGE,
+} from '../utils/formatError';
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -237,6 +242,10 @@ export function extractErrorMessage(
     return formatUserFacingError(err.message, err.code);
   }
 
+  if (isRequestTimeout(err)) {
+    return REQUEST_TIMEOUT_MESSAGE;
+  }
+
   if (err instanceof Error && isBackendUnreachable(err.message)) {
     return formatUserFacingError(err.message);
   }
@@ -287,10 +296,21 @@ async function getAuthToken(): Promise<string | null> {
 }
 
 /**
+ * Default request timeout for `apiFetch` — a backend hang or a silently
+ * dropped proxy connection must not leave the calling UI stuck in an
+ * indefinite loading state with no way to recover short of a page reload.
+ * 30s comfortably covers this app's normal request shapes (SSE streaming
+ * goes through `EventSource` directly, not `apiFetch`, so it is unaffected).
+ */
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
  * Core fetch wrapper — adds correlation ID and Bearer auth, parses JSON, throws on errors.
  * @param path    - Relative path under /api
  * @param init    - RequestInit merged with defaults
  * @returns Parsed JSON response body
+ * @throws {DOMException} `AbortError` if the request exceeds `DEFAULT_REQUEST_TIMEOUT_MS`
+ *   (or a caller-supplied `init.signal` aborts first)
  */
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const correlationId = newCorrelationId();
@@ -303,9 +323,13 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set('Content-Type', 'application/json');
   }
 
+  const timeoutSignal = AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS);
+  const signal = init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal;
+
   const response = await fetch(`${BASE_URL}${path}`, {
     ...init,
     headers,
+    signal,
   });
 
   if (!response.ok) {
@@ -371,6 +395,30 @@ export async function updateDocumentTags(id: string, tags: string[]): Promise<st
     { method: 'PATCH', body: JSON.stringify({ tags }) },
   );
   return body.data.tags;
+}
+
+/** One chunk's preview data, as returned by GET /api/documents/:id/chunks. */
+export interface ChunkPreview {
+  id: string;
+  chunkIndex: number;
+  /** Truncated chunk content — not the full chunk text. */
+  contentPreview: string;
+  /** True if contentPreview was truncated from the full chunk content. */
+  truncated: boolean;
+  tokenCount: number | null;
+}
+
+/**
+ * Fetches a preview (truncated content, up to 3 chunks) of a document's
+ * earliest chunks by index — backs the Documents page's expanded-row chunk
+ * preview.
+ * @param id - Document UUID
+ */
+export async function getDocumentChunkPreviews(id: string): Promise<ChunkPreview[]> {
+  const body = await apiFetch<{ success: boolean; data: { chunks: ChunkPreview[] } }>(
+    `/documents/${id}/chunks`,
+  );
+  return body.data.chunks;
 }
 
 /** Backend default for the similarity threshold — omit the query param when equal to this. */

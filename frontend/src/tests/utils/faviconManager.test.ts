@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { initFavicon, setFaviconState, resetFavicon } from '../../utils/faviconManager';
+import { initFavicon, setFaviconState } from '../../utils/faviconManager';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -20,7 +20,9 @@ beforeEach(() => {
   document.head.appendChild(linkElement);
 
   // Mock canvas getContext to return null (jsdom doesn't support Canvas)
-  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null as unknown as CanvasRenderingContext2D);
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
+    null as unknown as CanvasRenderingContext2D,
+  );
 });
 
 afterEach(() => {
@@ -49,20 +51,11 @@ describe('faviconManager', () => {
     }).not.toThrow();
   });
 
-  it('resetFavicon does not throw', () => {
-    initFavicon();
-    setFaviconState('ready');
-    expect(() => {
-      resetFavicon();
-    }).not.toThrow();
-  });
-
   it('does not throw when no link element exists', () => {
     document.head.removeChild(linkElement);
     expect(() => {
       initFavicon();
       setFaviconState('idle');
-      resetFavicon();
     }).not.toThrow();
     document.head.appendChild(linkElement);
   });

@@ -312,8 +312,16 @@ function segmentWithTableAwareness(
 /** The plain-text marker `extractTextFromMarkdown` produces for ATX headers. */
 const MD_SECTION_MARKER_REGEX = /^Section: .+$/;
 
-/** A numbered or "Chapter N" heading, e.g. "1. Getting Started", "1.2.3 Setup", "Chapter 4: Tools". */
-const NUMBERED_HEADING_REGEX = /^(?:\d+(?:\.\d+)*\.?|Chapter\s+\d+:?)\s+\S.{1,78}$/;
+/**
+ * A numbered or "Chapter N" heading, e.g. "1. Getting Started", "1.2.3 Setup",
+ * "Chapter 4: Tools". No upper bound on the heading text's length beyond what
+ * a single line already implies (segments spanning multiple lines are
+ * rejected before this regex ever runs, in isSectionHeading) — a long,
+ * mixed-case numbered heading is still a heading, and capping length here
+ * only pushed it into BARE_TITLE_REGEX, which requires every word
+ * capitalized and would reject it anyway.
+ */
+const NUMBERED_HEADING_REGEX = /^(?:\d+(?:\.\d+)*\.?|Chapter\s+\d+:?)\s+\S.{1,300}$/;
 
 /**
  * A short run of 2-8 words that are EACH capitalized (Title Case) or

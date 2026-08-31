@@ -76,6 +76,55 @@ function mapDocumentRow(row: DbDocumentRow): DocumentRecord {
   return result;
 }
 
+/**
+ * Translates the result of an owner-scoped mutation (`.eq('id', id).eq('user_id',
+ * userId)` on `.update()`/`.delete()` with `{ count: 'exact' }`) into the shared
+ * IDOR-prevention outcome: a mismatched owner or nonexistent document both
+ * surface as the same 404, since `count === 0` covers both cases identically —
+ * an attacker probing another user's document ID can never distinguish "not
+ * yours" from "doesn't exist". Used by setDocumentTags/deleteDocument, which
+ * differ only in which Supabase method (`.update()`/`.delete()`) built the
+ * query and the operation name in the error message.
+ * @param result - The `{ error, count }` result of the owner-scoped mutation
+ * @param documentId - UUID of the document being mutated, for the error message
+ * @param operation - Human-readable operation name (e.g. "set document tags"), for the error message
+ * @throws {NotFoundError} If `count` is 0 (no row matched id + user_id)
+ * @throws {InternalError} On database error
+ */
+function assertOwnedMutationSucceeded(
+  result: { error: { message: string } | null; count: number | null },
+  documentId: string,
+  operation: string,
+): void {
+  if (result.error) throw toDbInternalError(`Failed to ${operation}`, result.error.message);
+  if (result.count === 0) throw new NotFoundError(`Document ${documentId} not found`);
+}
+
+/**
+ * Verifies a document exists and is owned by `userId`, throwing the same
+ * IDOR-prevention 404 as the mutation path above when it isn't — for callers
+ * that need to confirm ownership as a standalone pre-check before a separate
+ * follow-up query (e.g. `getChunkQualityStats` querying `document_chunks`
+ * next), rather than scoping the ownership check into their own primary
+ * query directly (as `getDocument` does, since fetching the row *is* its
+ * primary query).
+ * @param documentId - UUID of the document to verify
+ * @param userId - Must match the document's owner
+ * @throws {NotFoundError} If no document with this ID is owned by userId
+ * @throws {InternalError} On database error
+ */
+async function assertDocumentOwnership(documentId: string, userId: string): Promise<void> {
+  const { data, error } = await getClient()
+    .from(TABLES.DOCUMENTS)
+    .select('id')
+    .eq('id', documentId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) throw toDbInternalError('Failed to verify document ownership', error.message);
+  if (!data) throw new NotFoundError(`Document ${documentId} not found`);
+}
+
 let _client: SupabaseClient | null = null;
 
 /**
@@ -223,7 +272,7 @@ export async function updateChunkCount(
 
   const { error } = await getClient()
     .from(TABLES.DOCUMENTS)
-    .update({ chunk_count: chunkCount, status: 'ready', updated_at: new Date().toISOString() })
+    .update({ chunk_count: chunkCount, updated_at: new Date().toISOString() })
     .eq('id', documentId);
 
   if (error) throw toDbInternalError('Failed to update chunk count', error.message);
@@ -291,14 +340,13 @@ export async function setDocumentTags(
   userId: string,
   tags: string[],
 ): Promise<void> {
-  const { error, count } = await getClient()
+  const result = await getClient()
     .from(TABLES.DOCUMENTS)
     .update({ tags }, { count: 'exact' })
     .eq('id', documentId)
     .eq('user_id', userId);
 
-  if (error) throw toDbInternalError('Failed to set document tags', error.message);
-  if (count === 0) throw new NotFoundError(`Document ${documentId} not found`);
+  assertOwnedMutationSucceeded(result, documentId, 'set document tags');
 }
 
 /**
@@ -383,7 +431,11 @@ function isValidRetrievedChunk(row: unknown): row is DbRetrievedChunk {
  * @param topK - Number of results to return
  * @param userId - Restricts the search to documents owned by this user
  * @param documentIds - Optional filter to search within specific documents
- * @param similarityThreshold - Optional minimum cosine similarity (defaults to the SQL function's default)
+ * @param similarityThreshold - Optional minimum cosine similarity; when omitted (undefined),
+ *   falls through to the SQL function's own default. In practice `QueryRequestSchema`
+ *   (query.schema.ts) gives this a Zod `.default(0)`, so requests arriving via
+ *   POST /api/query always pass an explicit 0 here and never actually hit the SQL
+ *   default — only a direct, non-HTTP caller of this function could reach it.
  * @param relativeFloorGap - Optional relative floor: drops candidates trailing the batch's
  *   own top match by more than this gap (defaults to the SQL function's default, 0.15;
  *   pass 0 or a negative number to disable)
@@ -651,16 +703,7 @@ export async function getChunkQualityStats(
   documentId: string,
   userId: string,
 ): Promise<ChunkQualityStats | null> {
-  const { data: ownerCheck, error: ownerError } = await getClient()
-    .from(TABLES.DOCUMENTS)
-    .select('id')
-    .eq('id', documentId)
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (ownerError)
-    throw toDbInternalError('Failed to verify document ownership', ownerError.message);
-  if (!ownerCheck) throw new NotFoundError(`Document ${documentId} not found`);
+  await assertDocumentOwnership(documentId, userId);
 
   const { data, error } = await getClient()
     .from(TABLES.CHUNKS)
@@ -698,6 +741,69 @@ export async function getChunkQualityStats(
     longChunkCount,
     grade,
   };
+}
+
+/** Max chunks returned by getDocumentChunkPreviews per call — matches ExpandedRow.tsx's "first N chunks" preview UI, not a full-document dump. */
+const MAX_CHUNK_PREVIEWS = 3;
+
+/** Chunk content is truncated to this length in previews — enough to judge chunk quality/relevance without shipping full chunk text (which can be ~2KB) for a UI element that only shows a few lines. */
+const CHUNK_PREVIEW_CONTENT_LENGTH = 240;
+
+/** One chunk's preview data, as returned by getDocumentChunkPreviews. */
+export interface ChunkPreview {
+  id: string;
+  chunkIndex: number;
+  /** Truncated chunk content — see CHUNK_PREVIEW_CONTENT_LENGTH. */
+  contentPreview: string;
+  /** True if contentPreview was truncated from the full chunk content. */
+  truncated: boolean;
+  tokenCount: number | null;
+}
+
+/**
+ * Returns a preview (truncated content, up to MAX_CHUNK_PREVIEWS chunks) of a
+ * document's earliest chunks by chunk_index, for the Documents page's
+ * expanded-row chunk preview. Ownership-checked the same way as
+ * getChunkQualityStats — safe to call directly without a caller having
+ * already verified ownership.
+ * @param documentId - Document UUID
+ * @param userId - Owner to scope the check to
+ * @returns Up to MAX_CHUNK_PREVIEWS chunk previews, ordered by chunk_index ascending
+ * @throws {NotFoundError} If the document doesn't exist or isn't owned by userId
+ */
+export async function getDocumentChunkPreviews(
+  documentId: string,
+  userId: string,
+): Promise<ChunkPreview[]> {
+  await assertDocumentOwnership(documentId, userId);
+
+  const { data, error } = await getClient()
+    .from(TABLES.CHUNKS)
+    .select('id, chunk_index, content, token_count')
+    .eq('document_id', documentId)
+    .order('chunk_index', { ascending: true })
+    .limit(MAX_CHUNK_PREVIEWS);
+
+  if (error) throw toDbInternalError('Failed to fetch chunk previews', error.message);
+  const rows = data as Array<{
+    id: string;
+    chunk_index: number;
+    content: string;
+    token_count: number | null;
+  }> | null;
+
+  return (rows ?? []).map((row) => {
+    const truncated = row.content.length > CHUNK_PREVIEW_CONTENT_LENGTH;
+    return {
+      id: row.id,
+      chunkIndex: row.chunk_index,
+      contentPreview: truncated
+        ? `${row.content.slice(0, CHUNK_PREVIEW_CONTENT_LENGTH)}…`
+        : row.content,
+      truncated,
+      tokenCount: row.token_count,
+    };
+  });
 }
 
 /** Cap on distinct section headings returned by getSuggestedTopics — enough for a handful of query-suggestion buttons without pulling a document's entire table of contents. */
@@ -871,9 +977,11 @@ export async function listQueryLogs(
 
   if (search && search.trim().length > 0) {
     // ILIKE via Supabase's .ilike() — parameterized by the client library,
-    // not string-interpolated. Wildcard metacharacters (% and _) in the user input
-    // are escaped so they match literally rather than acting as wildcards.
-    const escapedSearch = search.trim().replace(/[%_]/g, '\\$&');
+    // not string-interpolated. Backslashes must be escaped first (Postgres's
+    // own LIKE/ILIKE escape character), then the wildcard metacharacters (%
+    // and _), so a literal backslash in the search text (e.g. a Windows
+    // path) matches literally instead of escaping the character after it.
+    const escapedSearch = search.trim().replace(/\\/g, '\\\\').replace(/[%_]/g, '\\$&');
     query = query.ilike('query_text', `%${escapedSearch}%`);
   }
 
@@ -997,14 +1105,13 @@ export async function insertAuditLog(entry: InsertAuditLog): Promise<void> {
  * @throws {InternalError} On database error
  */
 export async function deleteDocument(documentId: string, userId: string): Promise<void> {
-  const { error, count } = await getClient()
+  const result = await getClient()
     .from(TABLES.DOCUMENTS)
     .delete({ count: 'exact' })
     .eq('id', documentId)
     .eq('user_id', userId);
 
-  if (error) throw toDbInternalError('Failed to delete document', error.message);
-  if (count === 0) throw new NotFoundError(`Document ${documentId} not found`);
+  assertOwnedMutationSucceeded(result, documentId, 'delete document');
 }
 
 // ─── Document Similarity ────────────────────────────────────────────────────────

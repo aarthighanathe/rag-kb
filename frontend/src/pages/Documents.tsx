@@ -7,7 +7,7 @@
  * @created 2026-06-16
  */
 
-import React, { useEffect, useCallback, useState, useRef, lazy, Suspense } from 'react';
+import React, { useEffect, useCallback, useMemo, useState, useRef, lazy, Suspense } from 'react';
 import { Link } from 'react-router-dom';
 import {
   RefreshCw,
@@ -41,7 +41,7 @@ import {
   fmtBytes,
   fmtDate,
   fmtDateTime,
-  hasFilenameCollision,
+  getDuplicateFilenameIds,
 } from '../utils/documentFormatters';
 import { pluralize } from '../utils/pluralize';
 
@@ -196,17 +196,29 @@ export function Documents(): React.JSX.Element {
     });
   }, []);
 
-  const filtered = documents
-    .filter((d) => statusFilter === 'all' || d.status === statusFilter)
-    .filter((d) => typeFilter === 'all' || extFromMime(d.mime_type, d.filename) === typeFilter);
+  const filtered = useMemo(
+    () =>
+      documents
+        .filter((d) => statusFilter === 'all' || d.status === statusFilter)
+        .filter((d) => typeFilter === 'all' || extFromMime(d.mime_type, d.filename) === typeFilter),
+    [documents, statusFilter, typeFilter],
+  );
 
-  const sorted = [...filtered].sort((a, b) => {
-    let cmp = 0;
-    if (sortKey === 'filename') cmp = a.filename.localeCompare(b.filename);
-    if (sortKey === 'created_at') cmp = a.created_at.localeCompare(b.created_at);
-    if (sortKey === 'status') cmp = a.status.localeCompare(b.status);
-    return sortDir === 'asc' ? cmp : -cmp;
-  });
+  const sorted = useMemo(
+    () =>
+      [...filtered].sort((a, b) => {
+        let cmp = 0;
+        if (sortKey === 'filename') cmp = a.filename.localeCompare(b.filename);
+        if (sortKey === 'created_at') cmp = a.created_at.localeCompare(b.created_at);
+        if (sortKey === 'status') cmp = a.status.localeCompare(b.status);
+        return sortDir === 'asc' ? cmp : -cmp;
+      }),
+    [filtered, sortKey, sortDir],
+  );
+
+  // Single O(n) pass instead of an O(n) `.some()` scan per row (O(n²) overall
+  // across the grid/table render).
+  const duplicateFilenameIds = useMemo(() => getDuplicateFilenameIds(sorted), [sorted]);
 
   const allChecked = sorted.length > 0 && sorted.every((d) => selected.has(d.id));
   const someChecked = sorted.some((d) => selected.has(d.id));
@@ -666,7 +678,7 @@ export function Documents(): React.JSX.Element {
                 selected={selected.has(doc.id)}
                 onSelect={() => toggleSelect(doc.id)}
                 onDelete={() => initiateDelete([doc])}
-                isDuplicateName={hasFilenameCollision(doc, sorted)}
+                isDuplicateName={duplicateFilenameIds.has(doc.id)}
               />
             ))}
           </div>
@@ -729,7 +741,7 @@ export function Documents(): React.JSX.Element {
                   const badge = STATUS_BADGE[doc.status];
                   const ext = extFromMime(doc.mime_type, doc.filename).toUpperCase();
                   const isExp = expanded.has(doc.id);
-                  const isDupe = hasFilenameCollision(doc, sorted);
+                  const isDupe = duplicateFilenameIds.has(doc.id);
 
                   return (
                     <React.Fragment key={doc.id}>

@@ -435,7 +435,7 @@ All services used are on permanently free tiers.
 ## Security
 
 - **Helmet** — strict CSP, HSTS, X-Content-Type-Options, Referrer-Policy, COEP/COOP/CORP
-- **CORS** — single allowed origin (`CORS_ORIGIN`), methods restricted to GET/POST/DELETE
+- **CORS** — single allowed origin (`CORS_ORIGIN`), methods restricted to GET/POST/PATCH/DELETE
 - **Rate limiting** — global 200/window + per-route limits (upload 5, query 30, documents 100)
 - **Input validation** — Zod schemas on every route, unknown keys stripped
 - **File validation** — magic-byte verification, filename security, zip-bomb detection
@@ -465,7 +465,7 @@ All services used are on permanently free tiers.
 - `GET /api/query/stream` cannot carry an Authorization header (EventSource limitation) — it relies on a short-lived, single-use `queryId` capability instead of a fresh JWT check (see [FEATURES.md](./FEATURES.md) §9.3)
 - HuggingFace free tier: 1,000 req/day (query embeddings are cached to reduce repeat calls — see FEATURES.md §3.1c — but document ingestion still consumes real quota)
 - Relation map similarity computation is hard-capped at 150 ready documents (fails fast with a clear message rather than a slow/degraded response) — no approximate-nearest-neighbor search yet
-- In-memory query store (`queryId` map) — lost on backend restart
+- Redis-backed query store (`queryId` → pending query, 2-minute TTL) — survives backend restarts and works correctly across multiple instances
 - No AV/malware scanning of uploaded file *content* — magic-byte and zip-bomb checks only (query *text* prompt-injection filtering is implemented — see Security above)
 - No working dark mode — the toggle scaffolding exists but the color system isn't yet CSS-variable-based (see FEATURES.md Known Issues)
 

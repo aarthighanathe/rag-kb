@@ -1,13 +1,12 @@
 /**
  * @file documents.ts
- * @description GET /api/documents, GET /api/documents/similarity, GET /api/documents/suggested-topics, GET /api/documents/:id, PATCH /api/documents/:id/tags, DELETE /api/documents/:id
+ * @description GET /api/documents, GET /api/documents/similarity, GET /api/documents/suggested-topics, GET /api/documents/:id, GET /api/documents/:id/chunks, PATCH /api/documents/:id/tags, DELETE /api/documents/:id
  * @author [Author Placeholder]
  * @created 2026-06-16
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
 import { validate } from '../middleware/validate.js';
-import { requireAuth } from '../middleware/requireAuth.js';
 import {
   ListDocumentsQuerySchema,
   DocumentIdParamSchema,
@@ -25,6 +24,7 @@ import {
   deleteDocument,
   computeDocumentSimilarity,
   getChunkQualityStats,
+  getDocumentChunkPreviews,
   getSuggestedTopics,
   setDocumentTags,
 } from '../services/vectorStore.js';
@@ -124,7 +124,6 @@ router.get(
  */
 router.get(
   '/suggested-topics',
-  requireAuth,
   validate(SuggestedTopicsQuerySchema, 'query'),
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const { documentIds } = req.query as unknown as SuggestedTopicsQuery;
@@ -175,6 +174,38 @@ router.get(
 );
 
 /**
+ * GET /api/documents/:id/chunks
+ * Returns a preview (truncated content, first few chunks by chunk_index) of
+ * a document's chunks, for the Documents page's expanded-row chunk preview
+ * — backs what was previously a hardcoded placeholder in the frontend
+ * (ExpandedRow.tsx). Ownership is enforced by getDocumentChunkPreviews
+ * itself (assertDocumentOwnership), matching every other per-document route
+ * in this file.
+ * @param req - Express request; `req.params.id` is the Zod-validated document UUID, `req.auth.userId` the caller
+ * @param res - Express response, sent as `{ success, data: { chunks }, meta }`
+ * @param next - Forwards any thrown error (e.g. NotFoundError for a missing/foreign document) to the central error handler
+ * @returns Resolves once the response has been sent or the error forwarded
+ */
+router.get(
+  '/:id/chunks',
+  validate(DocumentIdParamSchema, 'params'),
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const { id } = req.params as { id: string };
+    const userId = req.auth!.userId;
+    try {
+      const chunks = await getDocumentChunkPreviews(id, userId);
+      res.json({
+        success: true,
+        data: { chunks },
+        meta: { correlationId: req.correlationId },
+      });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+/**
  * PATCH /api/documents/:id/tags
  * Replaces a document's full tag list (auto-derived and/or manually-added tags
  * share this one field). Ownership is enforced by setDocumentTags itself,
@@ -187,7 +218,6 @@ router.get(
  */
 router.patch(
   '/:id/tags',
-  requireAuth,
   validate(DocumentIdParamSchema, 'params'),
   validate(UpdateDocumentTagsRequestSchema, 'body'),
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {

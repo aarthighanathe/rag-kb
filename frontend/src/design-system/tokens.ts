@@ -28,26 +28,6 @@ export const paper = {
   muted: '#F0EDEA',
 } as const;
 
-// Dark mode tokens - inverted palette for dark theme
-export const dark = {
-  base: '#0A0A0A',
-  deep: '#050505',
-  mid: '#121212',
-  border: '#1E1E1E',
-  primary: '#E8E6E3',
-  secondary: '#A8A4A0',
-  muted: '#6B6862',
-  hint: '#8A8578',
-} as const;
-
-export const darkPaper = {
-  base: '#141414',
-  surface: '#1A1A1A',
-  deep: '#0F0F0F',
-  border: '#2A2A2A',
-  muted: '#1E1E1E',
-} as const;
-
 export const stamp = {
   red: '#FF4D2E',
   redBg: '#FFF3E0',
@@ -73,13 +53,6 @@ export const danger = {
 } as const;
 
 export const white = '#FFFFFF' as const;
-
-export const colorSemantic = {
-  error: { bg: danger.bg, text: danger.DEFAULT, border: danger[30] },
-  success: { bg: archive.greenBg, text: archive.green, border: archive[20] },
-  info: { bg: stamp.redBg, text: stamp.red, border: stamp[20] },
-  warning: { bg: 'rgba(214,137,16,0.08)', text: '#D68910', border: 'rgba(214,137,16,0.30)' },
-} as const;
 
 export const fontFamily = {
   display: "'Fraunces Variable', Georgia, 'Times New Roman', serif",
@@ -155,17 +128,6 @@ export const easing = {
   smooth: 'cubic-bezier(0.4, 0, 0.2, 1)',
   settle: 'cubic-bezier(0.34, 1.56, 0.64, 1)',
   mechanical: 'cubic-bezier(0.0, 0.0, 0.2, 1)',
-} as const;
-
-export const stampRotation = {
-  stampBadge: '-8deg',
-  toastNote: '1deg',
-  cardA: '-1.2deg',
-  cardB: '0.8deg',
-  cardC: '-1deg',
-  cardD: '1.2deg',
-  badgeA: '-8deg',
-  badgeB: '5deg',
 } as const;
 
 export const zIndex = {

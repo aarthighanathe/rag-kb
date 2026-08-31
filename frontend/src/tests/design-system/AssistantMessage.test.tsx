@@ -26,6 +26,7 @@ const mockCitations: ChatCitation[] = [
     chunkRef: 'Chunk 1',
     relevanceScore: 0.94,
     fullText: 'This is the full text of chunk 1.',
+    citationNumber: 1,
   },
   {
     id: 'c2',
@@ -33,6 +34,7 @@ const mockCitations: ChatCitation[] = [
     chunkRef: 'Chunk 2',
     relevanceScore: 0.87,
     fullText: 'This is the full text of chunk 2.',
+    citationNumber: 2,
   },
 ];
 
@@ -42,50 +44,29 @@ describe('AssistantMessage', () => {
   // --------------------------------------------------------------------------
 
   it('renders answer text with CitationMarker components', () => {
-    render(
-      <AssistantMessage
-        content="Answer with citation ①."
-        citations={mockCitations}
-      />,
-      { wrapper },
-    );
+    render(<AssistantMessage content="Answer with citation ①." citations={mockCitations} />, {
+      wrapper,
+    });
     // Text is split by the CitationMarker, so we check for partial text
     expect(screen.getByText(/Answer with citation/)).toBeInTheDocument();
     expect(screen.getByTestId('citation-marker-1')).toBeInTheDocument();
   });
 
   it('renders with bracket notation citations', () => {
-    render(
-      <AssistantMessage
-        content="Answer [1] and [2]."
-        citations={mockCitations}
-      />,
-      { wrapper },
-    );
+    render(<AssistantMessage content="Answer [1] and [2]." citations={mockCitations} />, {
+      wrapper,
+    });
     expect(screen.getByTestId('citation-marker-1')).toBeInTheDocument();
     expect(screen.getByTestId('citation-marker-2')).toBeInTheDocument();
   });
 
   it('renders with data-testid="assistant-message-{messageIndex}"', () => {
-    render(
-      <AssistantMessage
-        content="Test"
-        citations={[]}
-        messageIndex={3}
-      />,
-      { wrapper },
-    );
+    render(<AssistantMessage content="Test" citations={[]} messageIndex={3} />, { wrapper });
     expect(screen.getByTestId('assistant-message-3')).toBeInTheDocument();
   });
 
   it('defaults to messageIndex=0 when not provided', () => {
-    render(
-      <AssistantMessage
-        content="Test"
-        citations={[]}
-      />,
-      { wrapper },
-    );
+    render(<AssistantMessage content="Test" citations={[]} />, { wrapper });
     expect(screen.getByTestId('assistant-message-0')).toBeInTheDocument();
   });
 
@@ -94,25 +75,13 @@ describe('AssistantMessage', () => {
   // --------------------------------------------------------------------------
 
   it('renders IndexCard for each citation', () => {
-    render(
-      <AssistantMessage
-        content="Answer ① ②."
-        citations={mockCitations}
-      />,
-      { wrapper },
-    );
+    render(<AssistantMessage content="Answer ① ②." citations={mockCitations} />, { wrapper });
     expect(screen.getByTestId('index-card-1')).toBeInTheDocument();
     expect(screen.getByTestId('index-card-2')).toBeInTheDocument();
   });
 
   it('each IndexCard receives correct citationIndex', () => {
-    render(
-      <AssistantMessage
-        content="Answer ① ②."
-        citations={mockCitations}
-      />,
-      { wrapper },
-    );
+    render(<AssistantMessage content="Answer ① ②." citations={mockCitations} />, { wrapper });
     const card1 = screen.getByTestId('index-card-1');
     const card2 = screen.getByTestId('index-card-2');
     expect(card1).toBeInTheDocument();
@@ -126,10 +95,7 @@ describe('AssistantMessage', () => {
   it('hovering citation marker sets activeCitation', async () => {
     const firstCitation = mockCitations[0];
     render(
-      <AssistantMessage
-        content="Answer ① ②."
-        citations={firstCitation ? mockCitations : []}
-      />,
+      <AssistantMessage content="Answer ① ②." citations={firstCitation ? mockCitations : []} />,
       { wrapper },
     );
     const marker = screen.getByTestId('citation-marker-1');
@@ -141,10 +107,7 @@ describe('AssistantMessage', () => {
   it('hovering card sets activeCitation', async () => {
     const firstCitation = mockCitations[0];
     render(
-      <AssistantMessage
-        content="Answer ① ②."
-        citations={firstCitation ? mockCitations : []}
-      />,
+      <AssistantMessage content="Answer ① ②." citations={firstCitation ? mockCitations : []} />,
       { wrapper },
     );
     const card = screen.getByTestId('index-card-1');
@@ -157,10 +120,7 @@ describe('AssistantMessage', () => {
   it('mouse leave resets activeCitation', async () => {
     const firstCitation = mockCitations[0];
     render(
-      <AssistantMessage
-        content="Answer ① ②."
-        citations={firstCitation ? mockCitations : []}
-      />,
+      <AssistantMessage content="Answer ① ②." citations={firstCitation ? mockCitations : []} />,
       { wrapper },
     );
     const marker = screen.getByTestId('citation-marker-1');
@@ -177,11 +137,7 @@ describe('AssistantMessage', () => {
 
   it('isStreaming=true disables citation interactions', () => {
     render(
-      <AssistantMessage
-        content="Streaming ①."
-        citations={mockCitations}
-        isStreaming={true}
-      />,
+      <AssistantMessage content="Streaming ①." citations={mockCitations} isStreaming={true} />,
       { wrapper },
     );
     const marker = screen.getByTestId('citation-marker-1');
@@ -190,28 +146,46 @@ describe('AssistantMessage', () => {
   });
 
   it('isStreaming=true shows streaming cursor', () => {
-    render(
-      <AssistantMessage
-        content="Thinking..."
-        citations={[]}
-        isStreaming={true}
-      />,
-      { wrapper },
-    );
+    render(<AssistantMessage content="Thinking..." citations={[]} isStreaming={true} />, {
+      wrapper,
+    });
     // StreamingCursor should be present (aria-hidden)
     expect(document.querySelector('[aria-hidden="true"]')).toBeInTheDocument();
   });
 
   it('isStreaming=false enables citation interactions', () => {
+    render(<AssistantMessage content="Done ①." citations={mockCitations} isStreaming={false} />, {
+      wrapper,
+    });
+    const marker = screen.getByTestId('citation-marker-1');
+    expect(marker).toHaveAttribute('role', 'button');
+  });
+
+  it('flags a citation number beyond the citations array as hallucinated and non-interactive', () => {
+    // Only 2 real sources — [5] has no matching IndexCard to jump to.
     render(
       <AssistantMessage
-        content="Done ①."
+        content="A hallucinated citation [5]."
         citations={mockCitations}
         isStreaming={false}
       />,
       { wrapper },
     );
-    const marker = screen.getByTestId('citation-marker-1');
+    const marker = screen.getByTestId('citation-marker-5');
+    expect(marker).not.toHaveAttribute('role', 'button');
+    expect(marker).toHaveAttribute('aria-label', 'Citation 5 — source not found');
+  });
+
+  it('does not flag an in-range citation as hallucinated', () => {
+    render(
+      <AssistantMessage
+        content="A valid citation [2]."
+        citations={mockCitations}
+        isStreaming={false}
+      />,
+      { wrapper },
+    );
+    const marker = screen.getByTestId('citation-marker-2');
     expect(marker).toHaveAttribute('role', 'button');
   });
 
@@ -222,7 +196,7 @@ describe('AssistantMessage', () => {
   it('multiple messages each have independent activeCitation state', async () => {
     const firstCitation = mockCitations[0];
     const secondCitation = mockCitations[1];
-    
+
     render(
       <>
         <AssistantMessage
@@ -230,8 +204,12 @@ describe('AssistantMessage', () => {
           citations={firstCitation ? [firstCitation] : []}
           messageIndex={0}
         />
+        {/* Each message's own citations array is independently 1-indexed —
+            this message cites its own (only) source as ①, not ②, since ②
+            would be out of range for a 1-item array and render as a
+            hallucinated/non-interactive marker instead. */}
         <AssistantMessage
-          content="Second ②."
+          content="Second ①."
           citations={secondCitation ? [secondCitation] : []}
           messageIndex={1}
         />
@@ -239,8 +217,12 @@ describe('AssistantMessage', () => {
       { wrapper },
     );
 
-    const marker1 = screen.getByTestId('assistant-message-0').querySelector('[data-testid="citation-marker-1"]');
-    const marker2 = screen.getByTestId('assistant-message-1').querySelector('[data-testid="citation-marker-2"]');
+    const marker1 = screen
+      .getByTestId('assistant-message-0')
+      .querySelector('[data-testid="citation-marker-1"]');
+    const marker2 = screen
+      .getByTestId('assistant-message-1')
+      .querySelector('[data-testid="citation-marker-1"]');
 
     expect(marker1).toBeInTheDocument();
     expect(marker2).toBeInTheDocument();
@@ -261,26 +243,14 @@ describe('AssistantMessage', () => {
   // --------------------------------------------------------------------------
 
   it('renders copy button on completed message', () => {
-    render(
-      <AssistantMessage
-        content="Copy me."
-        citations={[]}
-        isStreaming={false}
-      />,
-      { wrapper },
-    );
+    render(<AssistantMessage content="Copy me." citations={[]} isStreaming={false} />, { wrapper });
     expect(screen.getByRole('button', { name: /copy/i })).toBeInTheDocument();
   });
 
   it('does not render copy button during streaming', () => {
-    render(
-      <AssistantMessage
-        content="Streaming..."
-        citations={[]}
-        isStreaming={true}
-      />,
-      { wrapper },
-    );
+    render(<AssistantMessage content="Streaming..." citations={[]} isStreaming={true} />, {
+      wrapper,
+    });
     expect(screen.queryByRole('button', { name: /copy/i })).not.toBeInTheDocument();
   });
 
@@ -290,14 +260,7 @@ describe('AssistantMessage', () => {
 
   it('renders timestamp when provided', () => {
     const ts = new Date('2026-07-01T14:30:00').toISOString();
-    render(
-      <AssistantMessage
-        content="With time."
-        citations={[]}
-        timestamp={ts}
-      />,
-      { wrapper },
-    );
+    render(<AssistantMessage content="With time." citations={[]} timestamp={ts} />, { wrapper });
     expect(screen.getByText(/2:30/)).toBeInTheDocument();
   });
 
@@ -306,23 +269,19 @@ describe('AssistantMessage', () => {
   // --------------------------------------------------------------------------
 
   it('clicking citation marker scrolls card into view', async () => {
-    render(
-      <AssistantMessage
-        content="Click ① to scroll."
-        citations={mockCitations}
-      />,
-      { wrapper },
-    );
+    render(<AssistantMessage content="Click ① to scroll." citations={mockCitations} />, {
+      wrapper,
+    });
 
     const marker = screen.getByTestId('citation-marker-1');
     const card = screen.getByTestId('index-card-1');
-    
+
     // Mock scrollIntoView
     const scrollIntoViewMock = vi.fn();
     card.scrollIntoView = scrollIntoViewMock;
 
     await userEvent.click(marker);
-    
+
     expect(scrollIntoViewMock).toHaveBeenCalledWith({
       behavior: 'smooth',
       block: 'nearest',
@@ -330,21 +289,15 @@ describe('AssistantMessage', () => {
   });
 
   it('clicking citation adds card-pulse class', async () => {
-    render(
-      <AssistantMessage
-        content="Click ①."
-        citations={mockCitations}
-      />,
-      { wrapper },
-    );
+    render(<AssistantMessage content="Click ①." citations={mockCitations} />, { wrapper });
 
     const marker = screen.getByTestId('citation-marker-1');
     const card = screen.getByTestId('index-card-1');
-    
+
     card.scrollIntoView = vi.fn();
 
     await userEvent.click(marker);
-    
+
     expect(card.classList.contains('card-pulse')).toBe(true);
   });
 
@@ -373,10 +326,7 @@ describe('AssistantMessage', () => {
   it('highlight span has correct styling', async () => {
     const firstCitation = mockCitations[0];
     render(
-      <AssistantMessage
-        content="Text ①."
-        citations={firstCitation ? [firstCitation] : []}
-      />,
+      <AssistantMessage content="Text ①." citations={firstCitation ? [firstCitation] : []} />,
       { wrapper },
     );
 
@@ -394,24 +344,15 @@ describe('AssistantMessage', () => {
   // --------------------------------------------------------------------------
 
   it('renders ConfidenceBar on completed message with citations', () => {
-    render(
-      <AssistantMessage
-        content="Answer ①."
-        citations={mockCitations}
-        isStreaming={false}
-      />,
-      { wrapper },
-    );
+    render(<AssistantMessage content="Answer ①." citations={mockCitations} isStreaming={false} />, {
+      wrapper,
+    });
     expect(screen.getByTestId('confidence-bar')).toBeInTheDocument();
   });
 
   it('does not render ConfidenceBar during streaming', () => {
     render(
-      <AssistantMessage
-        content="Streaming ①."
-        citations={mockCitations}
-        isStreaming={true}
-      />,
+      <AssistantMessage content="Streaming ①." citations={mockCitations} isStreaming={true} />,
       { wrapper },
     );
     expect(screen.queryByTestId('confidence-bar')).not.toBeInTheDocument();
@@ -419,11 +360,7 @@ describe('AssistantMessage', () => {
 
   it('does not render ConfidenceBar when no citations', () => {
     render(
-      <AssistantMessage
-        content="Answer without sources."
-        citations={[]}
-        isStreaming={false}
-      />,
+      <AssistantMessage content="Answer without sources." citations={[]} isStreaming={false} />,
       { wrapper },
     );
     expect(screen.queryByTestId('confidence-bar')).not.toBeInTheDocument();
@@ -434,24 +371,15 @@ describe('AssistantMessage', () => {
   // --------------------------------------------------------------------------
 
   it('renders RelevanceTimeline on completed message with citations', () => {
-    render(
-      <AssistantMessage
-        content="Answer ①."
-        citations={mockCitations}
-        isStreaming={false}
-      />,
-      { wrapper },
-    );
+    render(<AssistantMessage content="Answer ①." citations={mockCitations} isStreaming={false} />, {
+      wrapper,
+    });
     expect(screen.getByTestId('relevance-timeline')).toBeInTheDocument();
   });
 
   it('does not render RelevanceTimeline during streaming', () => {
     render(
-      <AssistantMessage
-        content="Streaming ①."
-        citations={mockCitations}
-        isStreaming={true}
-      />,
+      <AssistantMessage content="Streaming ①." citations={mockCitations} isStreaming={true} />,
       { wrapper },
     );
     expect(screen.queryByTestId('relevance-timeline')).not.toBeInTheDocument();
@@ -459,11 +387,7 @@ describe('AssistantMessage', () => {
 
   it('RelevanceTimeline toggle expands to show bars', () => {
     render(
-      <AssistantMessage
-        content="Answer ① ②."
-        citations={mockCitations}
-        isStreaming={false}
-      />,
+      <AssistantMessage content="Answer ① ②." citations={mockCitations} isStreaming={false} />,
       { wrapper },
     );
     const toggle = screen.getByTestId('timeline-toggle');
@@ -482,15 +406,12 @@ describe('AssistantMessage', () => {
       chunkRef: `Chunk ${i + 1}`,
       relevanceScore: 0.5 + i * 0.05,
       fullText: `Full text ${i}`,
+      citationNumber: i + 1,
     }));
 
-    render(
-      <AssistantMessage
-        content="Answer ① ② ③ ④ ⑤ ⑥."
-        citations={manyCitations}
-      />,
-      { wrapper },
-    );
+    render(<AssistantMessage content="Answer ① ② ③ ④ ⑤ ⑥." citations={manyCitations} />, {
+      wrapper,
+    });
 
     // Only 3 IndexCards should be visible initially
     expect(screen.getByTestId('index-card-1')).toBeInTheDocument();
@@ -509,15 +430,12 @@ describe('AssistantMessage', () => {
       chunkRef: `Chunk ${i + 1}`,
       relevanceScore: 0.5 + i * 0.05,
       fullText: `Full text ${i}`,
+      citationNumber: i + 1,
     }));
 
-    render(
-      <AssistantMessage
-        content="Answer ① ② ③ ④ ⑤ ⑥."
-        citations={manyCitations}
-      />,
-      { wrapper },
-    );
+    render(<AssistantMessage content="Answer ① ② ③ ④ ⑤ ⑥." citations={manyCitations} />, {
+      wrapper,
+    });
 
     // Click "+ 3 more" link
     fireEvent.click(screen.getByText(/3 more/));
@@ -532,13 +450,9 @@ describe('AssistantMessage', () => {
   });
 
   it('does not show "+ N more" link when 3 or fewer citations', () => {
-    render(
-      <AssistantMessage
-        content="Answer ① ②."
-        citations={mockCitations.slice(0, 2)}
-      />,
-      { wrapper },
-    );
+    render(<AssistantMessage content="Answer ① ②." citations={mockCitations.slice(0, 2)} />, {
+      wrapper,
+    });
     expect(screen.queryByText(/more/)).not.toBeInTheDocument();
   });
 
@@ -563,7 +477,13 @@ describe('AssistantMessage', () => {
           // A fresh array literal every render, like Chat.tsx's
           // `msg.citations?.map(...)` — same values, new reference.
           citations={[
-            { id: 'c1', documentName: 'paper.pdf', chunkRef: 'Chunk 1', relevanceScore: citationScore },
+            {
+              id: 'c1',
+              documentName: 'paper.pdf',
+              chunkRef: 'Chunk 1',
+              relevanceScore: citationScore,
+              citationNumber: 1,
+            },
           ]}
           isStreaming={false}
         />
@@ -587,10 +507,9 @@ describe('AssistantMessage', () => {
   });
 
   it('still re-renders with updated content while streaming (memo does not stale-freeze the active message)', () => {
-    const { rerender } = render(
-      <AssistantMessage content="Partial" citations={[]} isStreaming />,
-      { wrapper },
-    );
+    const { rerender } = render(<AssistantMessage content="Partial" citations={[]} isStreaming />, {
+      wrapper,
+    });
     expect(screen.getByText(/Partial/)).toBeInTheDocument();
 
     rerender(<AssistantMessage content="Partial answer growing" citations={[]} isStreaming />);

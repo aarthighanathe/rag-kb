@@ -10,7 +10,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockGetClient = vi.fn();
-const mockExec = vi.fn();
+const mockExecFile = vi.fn();
 const mockAccess = vi.fn();
 const mockMkdir = vi.fn();
 const mockWriteFile = vi.fn();
@@ -18,6 +18,7 @@ const mockReadFile = vi.fn();
 const mockReaddir = vi.fn();
 const mockStat = vi.fn();
 const mockUnlink = vi.fn();
+const mockRm = vi.fn();
 
 vi.mock('../../src/services/vectorStore.js', () => ({
   getClient: () => mockGetClient(),
@@ -27,16 +28,30 @@ vi.mock('../../src/utils/logger.js', () => ({
   logger: { debug: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
+// A mutable object (not a fresh literal per test) so tests can reassign
+// `mockEnv.DATABASE_URL` and have backupService.ts's `env.DATABASE_URL` reads
+// see the change — vi.mock's factory only runs once, so this reference must
+// be the same one backupService.ts holds after import. vi.hoisted() is
+// required because vi.mock() factories are hoisted above normal top-level
+// const declarations, so a plain `const mockEnv = ...` above would still be
+// "not yet initialized" when the factory below runs.
+const mockEnv = vi.hoisted(
+  (): { ADMIN_SECRET: string; DATABASE_URL: string | undefined } => ({
+    ADMIN_SECRET: 'x'.repeat(32),
+    DATABASE_URL: undefined,
+  }),
+);
+
 vi.mock('../../src/config/env.js', () => ({
-  env: { ADMIN_SECRET: 'x'.repeat(32) },
+  env: mockEnv,
 }));
 
-// child_process.exec is wrapped via util.promisify in the source, which
-// reads exec.__promisify__; vitest's vi.mock replaces the whole module, so
-// we provide a plain async-compatible fn and let promisify use its normal
+// child_process.execFile is wrapped via util.promisify in the source, which
+// reads execFile.__promisify__; vitest's vi.mock replaces the whole module,
+// so we provide a plain async-compatible fn and let promisify use its normal
 // callback-style contract by exposing a callback overload.
 vi.mock('child_process', () => ({
-  exec: (...args: unknown[]) => mockExec(...args),
+  execFile: (...args: unknown[]) => mockExecFile(...args),
 }));
 
 vi.mock('fs/promises', () => ({
@@ -47,6 +62,7 @@ vi.mock('fs/promises', () => ({
   readdir: (...args: unknown[]) => mockReaddir(...args),
   stat: (...args: unknown[]) => mockStat(...args),
   unlink: (...args: unknown[]) => mockUnlink(...args),
+  rm: (...args: unknown[]) => mockRm(...args),
 }));
 
 vi.mock('fs', () => ({
@@ -59,6 +75,7 @@ vi.mock('fs', () => ({
     readdir: (...args: unknown[]) => mockReaddir(...args),
     stat: (...args: unknown[]) => mockStat(...args),
     unlink: (...args: unknown[]) => mockUnlink(...args),
+    rm: (...args: unknown[]) => mockRm(...args),
   },
 }));
 
@@ -111,9 +128,10 @@ function makeUpsertBuilder(errorForTable: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  delete process.env['DATABASE_URL'];
+  mockEnv.DATABASE_URL = undefined;
   // ensureBackupDirectory: directory already exists by default.
   mockAccess.mockResolvedValue(undefined);
+  mockRm.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -143,10 +161,11 @@ describe('performFullBackup', () => {
     expect(JSON.parse(written).documents).toEqual([{ id: '1' }]);
   });
 
-  it('uses pg_dump when DATABASE_URL is set and succeeds', async () => {
-    process.env['DATABASE_URL'] = 'postgres://user:pass@host:5432/db';
-    mockExec.mockImplementation((_cmd: string, cb: (err: unknown, result: unknown) => void) =>
-      cb(null, { stdout: '', stderr: '' }),
+  it('uses pg_dump via execFile (no shell) when DATABASE_URL is set and succeeds', async () => {
+    mockEnv.DATABASE_URL = 'postgres://user:pass@host:5432/db';
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], cb: (err: unknown, result: unknown) => void) =>
+        cb(null, { stdout: '', stderr: '' }),
     );
     mockStat.mockResolvedValue({ size: 12345 });
 
@@ -154,16 +173,23 @@ describe('performFullBackup', () => {
 
     expect(result.success).toBe(true);
     expect(result.sizeBytes).toBe(12345);
-    expect(mockExec).toHaveBeenCalledTimes(1);
-    const [command] = mockExec.mock.calls[0] as [string];
-    expect(command).toContain('pg_dump');
-    expect(command).toContain('-t documents -t document_chunks -t query_logs -t audit_logs');
+    expect(mockExecFile).toHaveBeenCalledTimes(1);
+    const [bin, args] = mockExecFile.mock.calls[0] as [string, string[]];
+    expect(bin).toBe('pg_dump');
+    expect(args).toContain('postgres://user:pass@host:5432/db');
+    expect(args).toEqual(
+      expect.arrayContaining(['-t', 'documents', '-t', 'document_chunks', '-t', 'query_logs', '-t', 'audit_logs']),
+    );
+    expect(args).toContain('--file');
+    // Argument array, not a shell string — no redirection/interpolation risk.
+    expect(args.join(' ')).not.toContain('>');
   });
 
-  it('falls back to the Supabase SDK backup when pg_dump fails', async () => {
-    process.env['DATABASE_URL'] = 'postgres://user:pass@host:5432/db';
-    mockExec.mockImplementation((_cmd: string, cb: (err: unknown, result: unknown) => void) =>
-      cb(new Error('pg_dump: command not found'), null),
+  it('falls back to the Supabase SDK backup when pg_dump fails, after removing any partial output file', async () => {
+    mockEnv.DATABASE_URL = 'postgres://user:pass@host:5432/db';
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], cb: (err: unknown, result: unknown) => void) =>
+        cb(new Error('pg_dump: command not found'), null),
     );
     mockGetClient.mockReturnValue(
       makeSelectAllBuilder({
@@ -178,7 +204,34 @@ describe('performFullBackup', () => {
     const result = await performFullBackup();
 
     expect(result.success).toBe(true);
+    expect(mockRm).toHaveBeenCalledTimes(1);
     expect(mockWriteFile).toHaveBeenCalledTimes(1);
+    // The cleanup must happen before the fallback writes to the same path.
+    const rmOrder = mockRm.mock.invocationCallOrder[0] ?? Infinity;
+    const writeOrder = mockWriteFile.mock.invocationCallOrder[0] ?? -Infinity;
+    expect(rmOrder).toBeLessThan(writeOrder);
+  });
+
+  it('does not throw when there is no partial file to remove after a pg_dump failure', async () => {
+    mockEnv.DATABASE_URL = 'postgres://user:pass@host:5432/db';
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], cb: (err: unknown, result: unknown) => void) =>
+        cb(new Error('pg_dump: command not found'), null),
+    );
+    mockRm.mockRejectedValue(new Error('ENOENT'));
+    mockGetClient.mockReturnValue(
+      makeSelectAllBuilder({
+        documents: { data: [], error: null },
+        document_chunks: { data: [], error: null },
+        query_logs: { data: [], error: null },
+        audit_logs: { data: [], error: null },
+      }),
+    );
+    mockWriteFile.mockResolvedValue(undefined);
+
+    const result = await performFullBackup();
+
+    expect(result.success).toBe(true);
   });
 
   it('creates the backup directory when it does not already exist', async () => {
@@ -390,18 +443,20 @@ describe('restoreBackup', () => {
     expect(ok).toBe(false);
   });
 
-  it('restores a plain-SQL backup via psql when DATABASE_URL is set', async () => {
-    process.env['DATABASE_URL'] = 'postgres://user:pass@host:5432/db';
+  it('restores a plain-SQL backup via psql (execFile, no shell) when DATABASE_URL is set', async () => {
+    mockEnv.DATABASE_URL = 'postgres://user:pass@host:5432/db';
     mockReadFile.mockResolvedValue('-- pg_dump output\nBEGIN;\nCOMMIT;\n');
-    mockExec.mockImplementation((_cmd: string, cb: (err: unknown, result: unknown) => void) =>
-      cb(null, { stdout: '', stderr: '' }),
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], cb: (err: unknown, result: unknown) => void) =>
+        cb(null, { stdout: '', stderr: '' }),
     );
 
     const ok = await restoreBackup('./backups/backup-full-x.sql');
 
     expect(ok).toBe(true);
-    const [command] = mockExec.mock.calls[0] as [string];
-    expect(command).toContain('psql');
+    const [bin, args] = mockExecFile.mock.calls[0] as [string, string[]];
+    expect(bin).toBe('psql');
+    expect(args).toEqual(['postgres://user:pass@host:5432/db', '-f', './backups/backup-full-x.sql']);
   });
 
   it('fails a SQL restore when DATABASE_URL is unset', async () => {

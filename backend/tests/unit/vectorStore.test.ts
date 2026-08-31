@@ -47,11 +47,13 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   createDocument,
   updateDocumentStatus,
+  updateChunkCount,
   upsertChunks,
   similaritySearch,
   keywordSearch,
   hybridSearch,
   getDocument,
+  getDocumentChunkPreviews,
   listDocuments,
   deleteDocument,
   cosineSimilarity,
@@ -337,6 +339,72 @@ describe('getSuggestedTopics', () => {
   });
 });
 
+// ─── getDocumentChunkPreviews ─────────────────────────────────────────────────
+
+describe('getDocumentChunkPreviews', () => {
+  it('returns up to 3 chunks ordered by chunk_index, truncating long content', async () => {
+    // assertDocumentOwnership: .select('id').eq('id',...).eq('user_id',...).maybeSingle()
+    chain.eq.mockReturnValueOnce(chain).mockReturnValueOnce(chain);
+    chain.maybeSingle.mockResolvedValueOnce({ data: { id: 'doc-1' }, error: null });
+    // chunk query: .select(...).eq('document_id',...).order(...).limit(...)
+    chain.eq.mockReturnValueOnce(chain);
+    chain.order.mockReturnValueOnce(chain);
+    const longContent = 'x'.repeat(300);
+    chain.limit.mockResolvedValueOnce({
+      data: [
+        { id: 'chunk-1', chunk_index: 0, content: 'short chunk', token_count: 12 },
+        { id: 'chunk-2', chunk_index: 1, content: longContent, token_count: 80 },
+      ],
+      error: null,
+    });
+
+    const result = await getDocumentChunkPreviews('doc-1', 'test-user-1');
+
+    expect(result).toEqual([
+      { id: 'chunk-1', chunkIndex: 0, contentPreview: 'short chunk', truncated: false, tokenCount: 12 },
+      {
+        id: 'chunk-2',
+        chunkIndex: 1,
+        contentPreview: `${longContent.slice(0, 240)}…`,
+        truncated: true,
+        tokenCount: 80,
+      },
+    ]);
+  });
+
+  it('returns an empty array for a document with no chunks yet', async () => {
+    chain.eq.mockReturnValueOnce(chain).mockReturnValueOnce(chain);
+    chain.maybeSingle.mockResolvedValueOnce({ data: { id: 'doc-1' }, error: null });
+    chain.eq.mockReturnValueOnce(chain);
+    chain.order.mockReturnValueOnce(chain);
+    chain.limit.mockResolvedValueOnce({ data: [], error: null });
+
+    const result = await getDocumentChunkPreviews('doc-1', 'test-user-1');
+    expect(result).toEqual([]);
+  });
+
+  it('throws NotFoundError when the document is not owned by the caller', async () => {
+    chain.eq.mockReturnValueOnce(chain).mockReturnValueOnce(chain);
+    chain.maybeSingle.mockResolvedValueOnce({ data: null, error: null });
+
+    await expect(
+      getDocumentChunkPreviews('doc-1', 'someone-elses-id'),
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('throws InternalError when the chunks query fails', async () => {
+    chain.eq.mockReturnValueOnce(chain).mockReturnValueOnce(chain);
+    chain.maybeSingle.mockResolvedValueOnce({ data: { id: 'doc-1' }, error: null });
+    chain.eq.mockReturnValueOnce(chain);
+    chain.order.mockReturnValueOnce(chain);
+    chain.limit.mockResolvedValueOnce({ data: null, error: { message: 'DB error' } });
+
+    await expect(getDocumentChunkPreviews('doc-1', 'test-user-1')).rejects.toBeInstanceOf(
+      InternalError,
+    );
+  });
+});
+
 // ─── updateDocumentStatus ─────────────────────────────────────────────────────
 
 describe('updateDocumentStatus', () => {
@@ -351,6 +419,27 @@ describe('updateDocumentStatus', () => {
   it('throws InternalError when update fails', async () => {
     chain.eq.mockResolvedValue({ error: { message: 'update failed' } });
     await expect(updateDocumentStatus('doc-1', 'failed', 'Parse error')).rejects.toBeInstanceOf(InternalError);
+  });
+});
+
+// ─── updateChunkCount ─────────────────────────────────────────────────────────
+
+describe('updateChunkCount', () => {
+  it('writes chunk_count without flipping status — the terminal status write belongs to updateDocumentStatus', async () => {
+    chain.eq.mockResolvedValue({ error: null });
+    await updateChunkCount('doc-1', 42);
+
+    expect(chain.update).toHaveBeenCalledWith(
+      expect.objectContaining({ chunk_count: 42 }),
+    );
+    const updatePayload = chain.update.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(updatePayload).not.toHaveProperty('status');
+    expect(chain.eq).toHaveBeenCalledWith('id', 'doc-1');
+  });
+
+  it('throws InternalError when the update fails', async () => {
+    chain.eq.mockResolvedValue({ error: { message: 'update failed' } });
+    await expect(updateChunkCount('doc-1', 5)).rejects.toBeInstanceOf(InternalError);
   });
 });
 
@@ -671,6 +760,25 @@ describe('listQueryLogs', () => {
     await listQueryLogs('test-user-1', 1, 20, '   ');
 
     expect(chain.ilike).not.toHaveBeenCalled();
+  });
+
+  it('escapes wildcard metacharacters (% and _) so they match literally', async () => {
+    chain.range.mockResolvedValue({ data: [], error: null, count: 0 });
+
+    await listQueryLogs('test-user-1', 1, 20, '50%_off');
+
+    expect(chain.ilike).toHaveBeenCalledWith('query_text', '%50\\%\\_off%');
+  });
+
+  it('escapes literal backslashes before wildcard characters, per Postgres LIKE/ILIKE escape semantics', async () => {
+    chain.range.mockResolvedValue({ data: [], error: null, count: 0 });
+
+    // A literal backslash (e.g. from a Windows path) must itself be escaped
+    // first — otherwise it would escape the character that follows it
+    // instead of matching as a literal "\".
+    await listQueryLogs('test-user-1', 1, 20, 'C:\\Users\\report');
+
+    expect(chain.ilike).toHaveBeenCalledWith('query_text', '%C:\\\\Users\\\\report%');
   });
 
   it('applies correct range for pagination', async () => {

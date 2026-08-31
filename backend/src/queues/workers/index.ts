@@ -6,3 +6,4 @@
  */
 
 export { documentWorker } from './documentWorker.js';
+export { maintenanceWorker, scheduleMaintenanceJobs } from '../maintenanceQueue.js';

@@ -7,6 +7,7 @@
 
 import { type Request, type Response, type NextFunction } from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import { runWithRequestContext } from '../utils/requestContext.js';
 
 export const CORRELATION_ID_HEADER = 'X-Correlation-ID';
 
@@ -21,12 +22,15 @@ export const CORRELATION_ID_HEADER = 'X-Correlation-ID';
  */
 export function correlationIdMiddleware(req: Request, res: Response, next: NextFunction): void {
   const existing = req.headers[CORRELATION_ID_HEADER.toLowerCase()];
-  const correlationId = typeof existing === 'string' && existing.length <= 128
-    ? existing.slice(0, 128)
-    : uuidv4();
+  const correlationId =
+    typeof existing === 'string' && existing.length <= 128 ? existing.slice(0, 128) : uuidv4();
 
   req.correlationId = correlationId;
   res.setHeader(CORRELATION_ID_HEADER, correlationId);
 
-  next();
+  // Makes correlationId available to every downstream handler and service
+  // call for this request via getRequestContext(), including code paths
+  // (upsertChunks, streamCompletion, etc.) that never receive it as an
+  // explicit parameter — the logger reads it from here automatically.
+  runWithRequestContext({ correlationId }, next);
 }

@@ -215,6 +215,22 @@ describe('embedBatch', () => {
     expect((err as EmbeddingError).code).toBe(EmbeddingErrorCode.INVALID_DIMENSION);
   });
 
+  it('throws EmbeddingError with COUNT_MISMATCH when the API returns fewer embeddings than inputs', async () => {
+    // HuggingFace silently dropping an empty/whitespace-only chunk would zip
+    // every subsequent embedding in the batch against the wrong input text —
+    // a count check must catch this before any zipping happens.
+    mockFetch.mockResolvedValue(mockResponse([makeEmbedding(0.1), makeEmbedding(0.2)]));
+
+    const errPromise = embedBatch(['text one', 'text two', 'text three']).catch(
+      (e: unknown) => e,
+    );
+    await vi.runAllTimersAsync();
+
+    const err = await errPromise;
+    expect(err).toBeInstanceOf(EmbeddingError);
+    expect((err as EmbeddingError).code).toBe(EmbeddingErrorCode.COUNT_MISMATCH);
+  });
+
   // ─── Malformed response shape (cold-start / overload) ────────────────────
 
   it('throws EmbeddingError (not a raw TypeError) when the API returns a 200 with a non-array body', async () => {

@@ -40,6 +40,7 @@ const citationSchema = z.object({
   chunkId: z.string(),
   similarity: z.number(),
   excerpt: z.string(),
+  citationNumber: z.number(),
 });
 
 const sseDataSchemas = {

@@ -20,14 +20,29 @@ import type { DocumentRecord } from '../../services/api';
 
 vi.mock('../../stores/ragStore', () => ({ useRagStore: vi.fn() }));
 
-const { getDocumentSimilarityMock } = vi.hoisted(() => ({
+const { getDocumentSimilarityMock, getDocumentChunkPreviewsMock } = vi.hoisted(() => ({
   getDocumentSimilarityMock: vi
     .fn()
     .mockResolvedValue({ pairs: [], documents: [], capped: false, readyDocumentCount: 0 }),
+  getDocumentChunkPreviewsMock: vi
+    .fn()
+    .mockResolvedValue([
+      {
+        id: 'chunk-1',
+        chunkIndex: 0,
+        contentPreview: 'Preview of chunk one',
+        truncated: false,
+        tokenCount: 20,
+      },
+    ]),
 }));
 vi.mock('../../services/api', async () => {
   const actual = await vi.importActual<typeof import('../../services/api')>('../../services/api');
-  return { ...actual, getDocumentSimilarity: getDocumentSimilarityMock };
+  return {
+    ...actual,
+    getDocumentSimilarity: getDocumentSimilarityMock,
+    getDocumentChunkPreviews: getDocumentChunkPreviewsMock,
+  };
 });
 
 vi.mock('../../contexts/ToastContext', () => ({
@@ -330,7 +345,10 @@ describe('Documents page — expand row (table view)', () => {
     await switchToTableView();
     const nameBtn = screen.getByRole('button', { name: /expand.*annual_report\.pdf/i });
     await userEvent.click(nameBtn);
-    expect(screen.getByText(/chunk 1/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/chunk 1/i)).toBeInTheDocument();
+    });
+    expect(getDocumentChunkPreviewsMock).toHaveBeenCalledWith('doc-1');
   });
 
   it('clicking again collapses the row', async () => {
@@ -338,6 +356,9 @@ describe('Documents page — expand row (table view)', () => {
     await switchToTableView();
     const nameBtn = screen.getByRole('button', { name: /expand.*annual_report\.pdf/i });
     await userEvent.click(nameBtn);
+    await waitFor(() => {
+      expect(screen.getByText(/chunk 1/i)).toBeInTheDocument();
+    });
     await userEvent.click(nameBtn);
     expect(screen.queryByText(/chunk 1/i)).not.toBeInTheDocument();
   });

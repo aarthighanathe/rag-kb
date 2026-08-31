@@ -51,6 +51,15 @@ const envSchema = z.object({
   // fail fast at boot instead, matching the other required secrets above.
   CORS_ORIGIN: z.string().url('CORS_ORIGIN is required and must be a valid URL'),
 
+  // Opt-in only: allows any https://*.devtunnels.ms origin through CORS, for local
+  // development via a VS Code forwarded tunnel. Defaults to disabled so a
+  // misconfigured NODE_ENV on a public staging deploy can't silently inherit a
+  // wide-open, publicly-assignable-subdomain trust decision.
+  ALLOW_DEVTUNNEL_CORS: z
+    .string()
+    .default('false')
+    .transform((v) => v === 'true'),
+
   // ── File upload limits ────────────────────────────────────────────────────
   MAX_FILE_SIZE_MB: z
     .string()
@@ -88,7 +97,20 @@ const envSchema = z.object({
 
   // ── Admin authentication ──────────────────────────────────────────────────
   // Passed via X-Admin-Secret header. Must be set explicitly — no default.
+  // Length alone can't prove entropy: generate this with a CSPRNG (e.g.
+  // `openssl rand -base64 32`), never a memorable or repeated-character string —
+  // Zod can only enforce the length floor, not randomness.
   ADMIN_SECRET: z.string().min(32, 'ADMIN_SECRET must be at least 32 characters'),
+
+  // ── Database (migrations + backup/restore CLI only) ──────────────────────
+  // Not used by the running server — only by scripts/migrate.ts and
+  // services/backupService.ts (pg_dump/psql). Optional here so the server
+  // itself doesn't fail to boot over a var it never reads; those scripts
+  // validate its presence themselves before use.
+  DATABASE_URL: z
+    .string()
+    .url('DATABASE_URL must be a valid Postgres connection string')
+    .optional(),
 
   // ── Authentication (Clerk) ────────────────────────────────────────────────
   // Used by requireAuth middleware to verify JWTs issued by Clerk (Google OAuth).

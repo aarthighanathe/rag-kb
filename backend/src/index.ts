@@ -10,8 +10,13 @@ import { env } from './config/env.js';
 import { createApp } from './app.js';
 import { logger, logFatalError } from './utils/logger.js';
 import { getQueue } from './queues/documentQueue.js';
-import { documentWorker } from './queues/workers/index.js';
-import { checkReadiness } from './utils/readiness.js';
+import {
+  documentWorker,
+  maintenanceWorker,
+  scheduleMaintenanceJobs,
+} from './queues/workers/index.js';
+import { getMaintenanceQueueForShutdown } from './queues/maintenanceQueue.js';
+import { checkReadiness, isCoreInfrastructureReady } from './utils/readiness.js';
 
 /** Maximum time to wait for in-flight requests to finish before forcing exit. */
 const SHUTDOWN_TIMEOUT_MS = 30_000;
@@ -46,8 +51,13 @@ async function gracefulShutdown(signal: string, server: Server): Promise<void> {
   }
 
   try {
-    await Promise.all([getQueue().close(), documentWorker.close()]);
-    logger.info('BullMQ queue and worker closed');
+    await Promise.all([
+      getQueue().close(),
+      documentWorker.close(),
+      getMaintenanceQueueForShutdown().close(),
+      maintenanceWorker.close(),
+    ]);
+    logger.info('BullMQ queues and workers closed');
   } catch (err) {
     logger.error('Error closing queue/worker during shutdown', { error: err });
   }
@@ -66,13 +76,37 @@ async function bootstrap(): Promise<void> {
   // password docker-compose's --requirepass enforces) or Supabase is
   // unreachable, the document queue would otherwise fail invisibly on the
   // first upload rather than at boot, where it's immediately actionable.
+  // Only Supabase/Redis — core infra this app cannot run without at all —
+  // block startup; HuggingFace/Groq are external per-request APIs that
+  // already fail gracefully at call time, so an outage in either at boot
+  // is logged but does not stop the server from starting.
   const startupReadiness = await checkReadiness();
+  if (!isCoreInfrastructureReady(startupReadiness)) {
+    logger.error('Core infrastructure unreachable at startup — refusing to start', {
+      checks: startupReadiness.checks,
+    });
+    process.exit(1);
+  }
   if (startupReadiness.status !== 'ok') {
-    logger.error('Startup dependency check failed — see checks for detail', {
+    logger.warn('Startup dependency check found a non-fatal issue — see checks for detail', {
       checks: startupReadiness.checks,
     });
   } else {
-    logger.info('Startup dependency check passed (Supabase + Redis reachable)');
+    logger.info('Startup dependency check passed (Supabase, Redis, HuggingFace, Groq reachable)');
+  }
+
+  // Registers the hourly backup and daily retention-cleanup repeatable jobs
+  // (idempotent — safe to call on every boot). A failure here is logged, not
+  // fatal: maintenance jobs are important but not core-request-path
+  // infrastructure the way Supabase/Redis reachability (checked above) is —
+  // the server should still come up and serve real user traffic even if job
+  // scheduling itself couldn't be registered this time.
+  try {
+    await scheduleMaintenanceJobs();
+  } catch (err) {
+    logger.error('Failed to schedule maintenance jobs — continuing startup', {
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   const app = createApp();

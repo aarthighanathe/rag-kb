@@ -5,15 +5,31 @@
  * @created 2026-08-23
  */
 
+import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { getClient } from './vectorStore.js';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { writeFile, mkdir, access } from 'fs/promises';
+import { writeFile, mkdir, access, rm } from 'fs/promises';
 import { join } from 'path';
 import { constants } from 'fs';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+/**
+ * Best-effort removal of a possibly-partial backup file left behind by a
+ * failed pg_dump/psql run, before a fallback writes a fresh file to the same
+ * path. Swallows errors — a missing file (nothing was ever written) is the
+ * common case, not a failure.
+ * @param filePath - Path of the file to remove
+ */
+async function removePartialFile(filePath: string): Promise<void> {
+  try {
+    await rm(filePath);
+  } catch {
+    // Nothing to clean up — pg_dump may have failed before writing anything.
+  }
+}
 
 // ─── Configuration ─────────────────────────────────────────────────────────────
 
@@ -97,24 +113,37 @@ export async function performFullBackup(): Promise<BackupResult> {
     const filename = generateBackupFilename('full');
     const filePath = join(BACKUP_CONFIG.storage.localPath, filename);
 
-    const databaseUrl = process.env['DATABASE_URL'];
+    const databaseUrl = env.DATABASE_URL;
     if (!databaseUrl) {
       logger.info('DATABASE_URL not set, defaulting to Supabase SDK backup method', { filename });
       return await performSupabaseBackup('full', filePath);
     }
 
-    // Build pg_dump command
-    const tablesArg =
-      BACKUP_CONFIG.tables.length > 0 ? `-t ${BACKUP_CONFIG.tables.join(' -t ')}` : '';
-
-    const command = `pg_dump "${databaseUrl}" ${tablesArg} --format=plain --no-owner --no-acl > "${filePath}"`;
+    // Build pg_dump argument array — passed to execFile (no shell, no string
+    // interpolation into a shell command) so a database URL or table name
+    // can never be interpreted as shell syntax. --file writes the output
+    // directly, replacing the shell's `> filePath` redirection.
+    const tableArgs = BACKUP_CONFIG.tables.flatMap((table) => ['-t', table]);
+    const args = [
+      databaseUrl,
+      ...tableArgs,
+      '--format=plain',
+      '--no-owner',
+      '--no-acl',
+      '--file',
+      filePath,
+    ];
 
     logger.info('Starting full database backup via pg_dump', { filename });
 
     try {
-      await execAsync(command);
+      await execFileAsync('pg_dump', args);
     } catch (error) {
-      // If pg_dump fails, fall back to Supabase SDK backup API
+      // If pg_dump fails partway through, it may have already written a
+      // partial file at filePath — remove it before the fallback writes a
+      // complete backup to the same path, so a later inspection (listBackups/
+      // restoreBackup) can never mistake a truncated file for a real one.
+      await removePartialFile(filePath);
       logger.warn('pg_dump failed or not available, using alternative backup method', { error });
       return await performSupabaseBackup('full', filePath);
     }
@@ -172,12 +201,18 @@ async function performSupabaseBackup(type: BackupType, filePath: string): Promis
   const timestamp = new Date();
 
   try {
-    // Export data from each table as JSON
+    // Export data from each table as JSON — tables are independent, so fetch
+    // them concurrently instead of paying one round trip per table serially.
     const backupData: Record<string, unknown[]> = {};
 
-    for (const table of BACKUP_CONFIG.tables) {
-      const { data, error } = await getClient().from(table).select('*');
+    const tableResults = await Promise.all(
+      BACKUP_CONFIG.tables.map(async (table) => {
+        const { data, error } = await getClient().from(table).select('*');
+        return { table, data, error };
+      }),
+    );
 
+    for (const { table, data, error } of tableResults) {
       if (error) {
         logger.warn(`Failed to backup table ${table}`, { error });
         backupData[table] = [];
@@ -248,13 +283,18 @@ export async function performIncrementalBackup(): Promise<BackupResult> {
     const backupData: Record<string, unknown[]> = {};
     const tablesBackedUp: string[] = [];
 
-    for (const table of BACKUP_CONFIG.tables) {
-      const timestampCol = table === 'documents' ? 'updated_at' : 'created_at';
-      const { data, error } = await getClient()
-        .from(table)
-        .select('*')
-        .gt(timestampCol, lastBackupTime.toISOString());
+    const tableResults = await Promise.all(
+      BACKUP_CONFIG.tables.map(async (table) => {
+        const timestampCol = table === 'documents' ? 'updated_at' : 'created_at';
+        const { data, error } = await getClient()
+          .from(table)
+          .select('*')
+          .gt(timestampCol, lastBackupTime.toISOString());
+        return { table, data, error };
+      }),
+    );
 
+    for (const { table, data, error } of tableResults) {
       if (error) {
         logger.warn(`Failed to backup table ${table}`, { error });
       } else if (data && data.length > 0) {
@@ -399,15 +439,13 @@ export async function listBackups(): Promise<BackupInfo[]> {
  * @returns True if the restore succeeded, false otherwise
  */
 async function restoreSqlBackup(filePath: string): Promise<boolean> {
-  const databaseUrl = process.env['DATABASE_URL'];
+  const databaseUrl = env.DATABASE_URL;
   if (!databaseUrl) {
     logger.error('SQL backup restoration requires DATABASE_URL environment variable', { filePath });
     return false;
   }
-  const command = `psql "${databaseUrl}" -f "${filePath}"`;
-
   try {
-    await execAsync(command);
+    await execFileAsync('psql', [databaseUrl, '-f', filePath]);
     logger.info('SQL backup restored successfully', { filePath });
     return true;
   } catch (error) {

@@ -159,6 +159,13 @@ export interface Citation {
   chunkRef: string;
   similarity: number;
   excerpt: string;
+  /**
+   * 1-based position in the original retrieval order — the same number the
+   * model was shown as `[N]` in its prompt. Distinct from array position in
+   * `citations`/`liveChunks`, which shifts once uncited/hallucinated entries
+   * are filtered out server-side (see filterCitationsByModelOutput).
+   */
+  citationNumber: number;
 }
 
 /** Helpfulness rating for a completed assistant answer. Mirrors the backend's query_logs.feedback enum. */
@@ -229,8 +236,6 @@ export interface RAGStore {
   messages: ChatMessage[];
   currentQuery: string;
   isStreaming: boolean;
-  streamingText: string;
-  citations: Citation[];
   /** Set by sendQuery; read by Chat page to build the SSE URL. */
   currentQueryId: string | null;
   /**
@@ -438,8 +443,6 @@ export const useRagStore = create<RAGStore>((set, get) => ({
   messages: [],
   currentQuery: '',
   isStreaming: false,
-  streamingText: '',
-  citations: [],
   currentQueryId: null,
   lastCompletedQuery: null,
   liveChunks: [],
@@ -483,8 +486,6 @@ export const useRagStore = create<RAGStore>((set, get) => ({
       messages: [...state.messages, userMessage, assistantMessage],
       currentQuery: query,
       isStreaming: true,
-      streamingText: '',
-      citations: [],
       currentQueryId: null,
       queryPhase: 'searching' as const,
       liveChunks: [],
@@ -523,9 +524,12 @@ export const useRagStore = create<RAGStore>((set, get) => ({
       messages: [],
       currentQuery: '',
       isStreaming: false,
-      streamingText: '',
-      citations: [],
       currentQueryId: null,
+      // Without these, starting a new conversation in split-screen mode left
+      // the previous query's sources and "complete" phase visibly stuck in
+      // SourcePanel, which reads queryPhase/liveChunks directly.
+      queryPhase: 'idle',
+      liveChunks: [],
     });
   },
 
@@ -538,7 +542,7 @@ export const useRagStore = create<RAGStore>((set, get) => ({
       if (last?.role === 'assistant') {
         messages[messages.length - 1] = { ...last, content: last.content + token };
       }
-      return { messages, streamingText: state.streamingText + token };
+      return { messages };
     });
   },
 
@@ -570,7 +574,6 @@ export const useRagStore = create<RAGStore>((set, get) => ({
       return {
         messages,
         isStreaming: false,
-        citations,
         currentQueryId: null,
         queryPhase: 'complete' as const,
         lastCompletedQuery: {

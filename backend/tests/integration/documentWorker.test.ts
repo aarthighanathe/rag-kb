@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
-import { JobCancelledError } from '@queues/cancellation';
+import { JobCancelledError, cancelJob } from '@queues/cancellation';
 
 // ── Service mocks (must be declared before module imports) ────────────────────
 
@@ -147,6 +147,15 @@ await import('@queues/workers/documentWorker');
 
 // Grab the captured processor function
 const getProcessor = () => capturedProcessors[capturedProcessors.length - 1]!;
+
+// mockWorkerOn's call history is cleared by later vi.clearAllMocks() calls in
+// various describe blocks' beforeEach hooks, but the worker's `.on('active',
+// ...)` registration only ever happens once, at this module-level import —
+// so the handler must be captured now, immediately after import, not looked
+// up later via mockWorkerOn.mock.calls.
+const activeEventHandler = mockWorkerOn.mock.calls.find(([event]) => event === 'active')![1] as (
+  job: { id: string; data: { documentId: string } },
+) => void;
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -535,6 +544,42 @@ describe('documentWorker — cancellation under retry race', () => {
 
     expect(statusWrites.filter((c) => c[0] === 'doc-x' && c[1] === 'ready')).toHaveLength(1);
     expect(statusWrites.filter((c) => c[0] === 'doc-y' && c[1] === 'ready')).toHaveLength(1);
+  });
+});
+
+describe('documentWorker — early cancellation registration on BullMQ\'s \'active\' event', () => {
+  it('registers a cancellable attempt as soon as the \'active\' handler fires — before the processor body ever runs', () => {
+    // In production BullMQ emits 'active' (and this handler runs, fully
+    // synchronously) before the job's processor function is ever invoked —
+    // closing the startup race where a DELETE request could otherwise find
+    // no AbortController registered yet for a job Redis already reports as
+    // 'active'. Verify the handler itself, independent of the processor.
+    activeEventHandler({ id: 'job-early-reg', data: { documentId: 'doc-early-reg' } });
+
+    // A controller is now registered and cancellable purely from the
+    // 'active' handler having run — no processor invocation needed.
+    expect(cancelJob('job-early-reg')).toBe(true);
+  });
+
+  it('the processor\'s own beginAttempt supersedes the \'active\' pre-registration without leaking a dangling entry', async () => {
+    mockUpdateDocumentStatus.mockResolvedValue(undefined);
+    mockUpsertChunks.mockResolvedValue(undefined);
+    mockUpdateChunkCount.mockResolvedValue(undefined);
+    mockExtractText.mockResolvedValue('text');
+    mockCreateChunks.mockReturnValue(makeChunks(1));
+    mockEmbedBatch.mockResolvedValue(makeEmbeddings(1));
+
+    const job = makeJob({ documentId: 'doc-early-reg-2' });
+    job.id = 'job-early-reg-2';
+
+    // Simulate BullMQ's real ordering: 'active' fires first, then the
+    // processor runs.
+    activeEventHandler({ id: job.id, data: { documentId: job.data.documentId } });
+    await getProcessor()(job);
+
+    // The processor's own controller has already ended (job completed) —
+    // nothing should still be registered for this job ID.
+    expect(cancelJob('job-early-reg-2')).toBe(false);
   });
 });
 

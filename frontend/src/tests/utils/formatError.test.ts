@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { formatUserFacingError } from '../../utils/formatError';
+import { formatUserFacingError, isRequestTimeout } from '../../utils/formatError';
 
 describe('formatUserFacingError', () => {
   it('maps DB_CONNECTIVITY code to a setup hint regardless of message text', () => {
@@ -28,7 +28,8 @@ describe('formatUserFacingError', () => {
   });
 
   it('passes through DB_SCHEMA_NOT_MIGRATED messages unchanged (already user-facing)', () => {
-    const msg = 'Database schema is not set up. Run `cd backend && npm run db:migrate`, then restart the backend.';
+    const msg =
+      'Database schema is not set up. Run `cd backend && npm run db:migrate`, then restart the backend.';
     expect(formatUserFacingError(msg, 'DB_SCHEMA_NOT_MIGRATED')).toBe(msg);
   });
 
@@ -46,8 +47,9 @@ describe('formatUserFacingError', () => {
   });
 
   it('maps Firefox and Safari fetch failure messages to a server hint', () => {
-    expect(formatUserFacingError('NetworkError when attempting to fetch resource.'))
-      .toMatch(/could not reach the server/i);
+    expect(formatUserFacingError('NetworkError when attempting to fetch resource.')).toMatch(
+      /could not reach the server/i,
+    );
     expect(formatUserFacingError('Load failed')).toMatch(/could not reach the server/i);
   });
 
@@ -59,5 +61,23 @@ describe('formatUserFacingError', () => {
   it('passes through a generic DB_GENERIC-coded message unchanged (context already embedded server-side)', () => {
     const msg = 'Failed to list documents: duplicate key value';
     expect(formatUserFacingError(msg, 'DB_GENERIC')).toBe(msg);
+  });
+});
+
+describe('isRequestTimeout', () => {
+  it('recognizes the DOMException AbortSignal.timeout() throws', () => {
+    const err = new DOMException('signal timed out', 'TimeoutError');
+    expect(isRequestTimeout(err)).toBe(true);
+  });
+
+  it('does not misclassify a manually aborted request (AbortError) as a timeout', () => {
+    const err = new DOMException('The operation was aborted.', 'AbortError');
+    expect(isRequestTimeout(err)).toBe(false);
+  });
+
+  it('returns false for a plain Error or non-error value', () => {
+    expect(isRequestTimeout(new Error('boom'))).toBe(false);
+    expect(isRequestTimeout('boom')).toBe(false);
+    expect(isRequestTimeout(null)).toBe(false);
   });
 });

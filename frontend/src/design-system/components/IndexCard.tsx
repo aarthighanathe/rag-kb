@@ -66,7 +66,7 @@ function hashString(s: string): number {
 function getCardRotation(documentName: string, index: number): number {
   const seed = hashString(`${documentName}::${index}`);
   // Map [0, 2^31) → [-1.5, 1.5]
-  return ((seed % 300) / 100) - 1.5;
+  return (seed % 300) / 100 - 1.5;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,9 +76,9 @@ function getCardRotation(documentName: string, index: number): number {
 function DocTypeIcon({ name }: { name: string }): React.JSX.Element {
   const ext = name.split('.').pop()?.toLowerCase();
   const cls = 'shrink-0 text-ds-text-muted';
-  if (ext === 'md')   return <FileCode   size={14} className={cls} aria-hidden="true" />;
-  if (ext === 'docx') return <FileType   size={14} className={cls} aria-hidden="true" />;
-  return               <FileText size={14} className={cls} aria-hidden="true" />;
+  if (ext === 'md') return <FileCode size={14} className={cls} aria-hidden="true" />;
+  if (ext === 'docx') return <FileType size={14} className={cls} aria-hidden="true" />;
+  return <FileText size={14} className={cls} aria-hidden="true" />;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,21 +136,25 @@ export function IndexCard({
   isActive = false,
   onEnter,
   onLeave,
+  onTouch,
   cardRef,
 }: IndexCardProps): React.JSX.Element {
   const [isFlipped, setIsFlipped] = useState(false);
   const cardId = useId();
   const frontId = `${cardId}-front`;
-  const backId  = `${cardId}-back`;
+  const backId = `${cardId}-back`;
 
   const pct = Math.round(relevanceScore * 100);
   const rotation = getCardRotation(documentName, index);
   const isTopMatch = index === 0;
 
   // Register ref callback for scroll-into-view support
-  const rootRef = useCallback((el: HTMLElement | null) => {
-    if (cardRef) cardRef(el);
-  }, [cardRef]);
+  const rootRef = useCallback(
+    (el: HTMLElement | null) => {
+      if (cardRef) cardRef(el);
+    },
+    [cardRef],
+  );
 
   const handleMouseEnter = useCallback(() => {
     if (onEnter && citationIndex !== undefined) {
@@ -161,6 +165,16 @@ export function IndexCard({
   const handleMouseLeave = useCallback(() => {
     if (onLeave) onLeave();
   }, [onLeave]);
+
+  // Mobile tap highlight — mirrors handleMouseEnter but for touchstart, since
+  // touch devices never fire mouseenter/mouseleave. onCardTouch (from
+  // useCitationHighlight) auto-resets the highlight after a short delay,
+  // simulating hover on a touch device.
+  const handleTouchStart = useCallback(() => {
+    if (onTouch && citationIndex !== undefined) {
+      onTouch(citationIndex);
+    }
+  }, [onTouch, citationIndex]);
 
   // Detect reduced-motion preference
   const prefersReducedMotion =
@@ -219,13 +233,18 @@ export function IndexCard({
         style={activeStyles}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
+        onTouchStart={handleTouchStart}
       >
         {isTopMatch && <Paperclip />}
 
         <button
           type="button"
           aria-pressed={isFlipped}
-          aria-label={isFlipped ? `Back of card: ${documentName}` : `Card: ${documentName}, ${pct}% relevance. Press to see full text.`}
+          aria-label={
+            isFlipped
+              ? `Back of card: ${documentName}`
+              : `Card: ${documentName}, ${pct}% relevance. Press to see full text.`
+          }
           onClick={handleFlip}
           onKeyDown={handleKeyDown}
           className={`${cardSurface} text-left cursor-pointer focus-visible:outline-2 focus-visible:outline-ds-stamp focus-visible:outline-offset-2`}
@@ -248,7 +267,8 @@ export function IndexCard({
               <div className="flex items-center gap-1.5 mb-2 pr-10 min-w-0">
                 <DocTypeIcon name={documentName} />
                 <span className="text-ds-xs font-body font-medium text-ds-text-primary truncate min-w-0">
-                  {documentName}{chunkRef ? ` · ${chunkRef}` : ''}
+                  {documentName}
+                  {chunkRef ? ` · ${chunkRef}` : ''}
                 </span>
               </div>
               <p className="text-ds-xs font-mono text-ds-text-secondary leading-relaxed line-clamp-3">
@@ -286,6 +306,7 @@ export function IndexCard({
       style={activeStyles}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onTouchStart={handleTouchStart}
     >
       {isTopMatch && <Paperclip />}
 
@@ -321,7 +342,8 @@ export function IndexCard({
             <div className="flex items-center gap-1.5 mb-2 pr-10 min-w-0">
               <DocTypeIcon name={documentName} />
               <span className="text-ds-xs font-body font-medium text-ds-text-primary truncate min-w-0">
-                {documentName}{chunkRef ? ` · ${chunkRef}` : ''}
+                {documentName}
+                {chunkRef ? ` · ${chunkRef}` : ''}
               </span>
             </div>
             <p className="text-ds-xs font-mono text-ds-text-secondary leading-relaxed line-clamp-3">

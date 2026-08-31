@@ -71,6 +71,8 @@ All rules are enforced in every file generated. No exceptions.
 ### Rule 2 — Zod Schemas for Every API Route
 Every API route must have a corresponding Zod schema for both request and response shapes, defined in `backend/src/schemas/` before implementation.
 
+> **Known gap:** request-shape validation is implemented and enforced on every route today; response-shape validation is not yet implemented anywhere in the codebase. Retrofitting response validation across all existing endpoints is tracked as a known gap rather than an active, currently-enforced requirement — new routes should still define a response schema alongside the request schema where practical, but the absence of one on an existing route is not a rule violation until this gap is closed.
+
 ### Rule 3 — Tests in the Same Commit
 Every new service or utility must have a unit test created in the same commit. No service ships without tests.
 
@@ -99,6 +101,8 @@ Run `npm run complexity-audit` to verify. Functions exceeding complexity 10 must
 
 ### Rule 9 — No `console.log`
 Use Winston logger exclusively. `no-console` is a linting error. Import the logger from `@utils/logger`.
+
+> **Exception — CLI scripts:** `backend/scripts/*.ts` entry points (e.g. `migrate.ts`, `check-supabase.ts`, `backup.ts`, `validate-swagger.ts`) are exempt from this rule. They are human-facing CLI tools run directly by an operator and read via stdout, not server request-handling code whose output feeds the application's log pipeline — `console.log`/`console.error` is the correct, expected way to communicate with a human running them interactively. `no-console` is only enforced against `backend/src/**`.
 
 ### Rule 10 — All Errors Typed and Handled
 No unhandled promise rejections. All async functions must have try/catch or propagate typed errors. Create custom error classes in `types/index.ts`.

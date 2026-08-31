@@ -6,12 +6,18 @@
  * @created 2026-08-24
  */
 
-import React from 'react';
-import type { DocumentRecord } from '../../services/api';
+import React, { useEffect, useState } from 'react';
+import type { ChunkPreview, DocumentRecord } from '../../services/api';
+import { getDocumentChunkPreviews, extractErrorMessage } from '../../services/api';
+import { clientLog } from '../../utils/clientLogger';
 import { TagEditor } from './TagEditor';
+import { LoadingSpinner } from './LoadingSpinner';
 
 /**
  * Expanded detail row shown beneath a document's table row when toggled open.
+ * Fetches real chunk previews from GET /api/documents/:id/chunks on mount —
+ * this component only mounts while its row is expanded (see Documents.tsx),
+ * so the fetch is already naturally lazy without an extra "load more" click.
  * @param doc - Document whose details are being shown
  * @param colSpan - Number of columns the detail cell should span
  * @returns Expanded row element
@@ -23,6 +29,31 @@ export function ExpandedRow({
   doc: DocumentRecord;
   colSpan: number;
 }): React.JSX.Element {
+  const [chunks, setChunks] = useState<ChunkPreview[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (doc.chunk_count === 0) return;
+
+    let cancelled = false;
+    setChunks(null);
+    setError(null);
+
+    getDocumentChunkPreviews(doc.id)
+      .then((result) => {
+        if (!cancelled) setChunks(result);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        clientLog('error', '[ExpandedRow] Failed to load chunk previews', err);
+        setError(extractErrorMessage(err));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [doc.id, doc.chunk_count]);
+
   return (
     <tr>
       <td colSpan={colSpan} className="px-4 pb-4 pt-0 bg-ds-base">
@@ -34,25 +65,34 @@ export function ExpandedRow({
             <p className="text-ds-xs font-body text-ds-text-muted italic">
               No chunks yet — still processing.
             </p>
+          ) : error ? (
+            <p className="text-ds-xs font-body text-ds-error">
+              Couldn&apos;t load chunk previews: {error}
+            </p>
+          ) : chunks === null ? (
+            <div className="flex items-center gap-2 py-2">
+              <LoadingSpinner size="sm" label="Loading chunk previews…" />
+              <span className="text-ds-xs font-mono text-ds-text-muted">Loading chunks…</span>
+            </div>
           ) : (
             <>
               <p className="text-ds-xs font-mono text-ds-text-muted mb-2">
-                First {Math.min(3, doc.chunk_count)} of {doc.chunk_count} chunks
+                First {chunks.length} of {doc.chunk_count} chunks
               </p>
               <div className="space-y-2">
-                {[1, 2, 3]
-                  .filter((n) => n <= doc.chunk_count)
-                  .map((n) => (
-                    <div
-                      key={n}
-                      className="bg-ds-card border border-ds-hairline rounded-[2px] px-3 py-2"
-                    >
-                      <span className="text-[10px] font-mono text-ds-archive">Chunk {n}</span>
-                      <p className="text-ds-xs font-mono text-ds-text-muted mt-0.5 italic">
-                        (Query the document to see content)
-                      </p>
-                    </div>
-                  ))}
+                {chunks.map((chunk) => (
+                  <div
+                    key={chunk.id}
+                    className="bg-ds-card border border-ds-hairline rounded-[2px] px-3 py-2"
+                  >
+                    <span className="text-[10px] font-mono text-ds-archive">
+                      Chunk {chunk.chunkIndex + 1}
+                    </span>
+                    <p className="text-ds-xs font-mono text-ds-text-muted mt-0.5">
+                      {chunk.contentPreview || <span className="italic">(empty chunk)</span>}
+                    </p>
+                  </div>
+                ))}
               </div>
             </>
           )}

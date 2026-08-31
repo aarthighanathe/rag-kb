@@ -86,20 +86,24 @@ export function securityMiddleware(app: Application): void {
     // precedence: reuse a client-supplied ID if present, else mint a UUID.
     cors((req, callback) => {
       const rawId = req.headers[CORRELATION_ID_HEADER.toLowerCase()];
-      const correlationId = typeof rawId === 'string' && rawId.length <= 128 ? rawId.slice(0, 128) : uuidv4();
+      const correlationId =
+        typeof rawId === 'string' && rawId.length <= 128 ? rawId.slice(0, 128) : uuidv4();
       const origin = req.headers.origin;
 
       // Allow server-to-server requests (no Origin header) and the configured origin.
-      // In non-production, also allow VS Code devtunnel origins (random per-session
-      // subdomain) so the app works both on localhost and through a forwarded tunnel
-      // without editing CORS_ORIGIN every time a new tunnel is created.
-      const isDevTunnel = env.NODE_ENV !== 'production' && /^https:\/\/[^/]+\.devtunnels\.ms$/.test(origin ?? '');
+      // Devtunnel origins (random per-session subdomain) are allowed only when
+      // explicitly opted in via ALLOW_DEVTUNNEL_CORS, so a staging deploy left on
+      // NODE_ENV=development doesn't silently inherit a wide-open *.devtunnels.ms
+      // trust decision.
+      const isDevTunnel =
+        env.ALLOW_DEVTUNNEL_CORS && /^https:\/\/[^/]+\.devtunnels\.ms$/.test(origin ?? '');
       if (!origin || origin === env.CORS_ORIGIN || isDevTunnel) {
         callback(null, {
           // Echo back the actual request origin (not '*') — matches the
           // prior static-origin-callback behavior of `callback(null, true)`.
           origin: true,
-          methods: ['GET', 'POST', 'DELETE'],
+          // PATCH is required for PATCH /api/documents/:id/tags (tag editing).
+          methods: ['GET', 'POST', 'PATCH', 'DELETE'],
           allowedHeaders: ['Content-Type', 'X-Correlation-ID', 'X-Admin-Secret', 'Authorization'],
           exposedHeaders: ['X-Correlation-ID', 'X-RateLimit-Remaining'],
           credentials: false,

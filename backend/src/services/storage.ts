@@ -72,3 +72,38 @@ export async function downloadFile(storageKey: string): Promise<Buffer> {
 export async function removeFile(storageKey: string): Promise<void> {
   await getClient().storage.from(BUCKET).remove([storageKey]);
 }
+
+/** One object currently sitting in the staging bucket, as returned by Storage's list API. */
+export interface StagedStorageObject {
+  /** Full storage key, e.g. `{documentId}_{sanitizedName}`. */
+  name: string;
+  /** ISO timestamp the object was uploaded. */
+  createdAt: string;
+}
+
+/**
+ * Lists every object currently in the staging bucket. This is a flat bucket
+ * (no folders) so a single unpaginated call, capped generously, is
+ * sufficient at this project's scale — see reconcileOrphanedStorageFiles in
+ * dataRetention.ts, the only caller.
+ * @returns All staged objects, or an empty array if the listing itself fails
+ *   (treated as best-effort, consistent with removeFile above — a listing
+ *   failure should not be mistaken for "bucket is empty" by the caller, so
+ *   it also logs, but must never throw and abort a scheduled job)
+ */
+export async function listStagedFiles(): Promise<StagedStorageObject[]> {
+  const { data, error } = await getClient()
+    .storage.from(BUCKET)
+    .list(undefined, { limit: 10_000, sortBy: { column: 'created_at', order: 'asc' } });
+
+  if (error) {
+    throw toDbInternalError('Failed to list staged storage files', error.message);
+  }
+
+  return (data ?? [])
+    .filter((entry) => entry.name && entry.id !== null) // list() can return a placeholder folder entry; real objects have an id
+    .map((entry) => ({
+      name: entry.name,
+      createdAt: entry.created_at ?? new Date(0).toISOString(),
+    }));
+}

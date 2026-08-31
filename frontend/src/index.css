@@ -274,6 +274,17 @@
 }
 
 /* ============================================================================
+   RELEVANCE TIMELINE — STAGGERED ROW ENTRANCE
+   ============================================================================ */
+
+/* Used by RelevanceTimeline.tsx's per-row `animation: timelineSlideIn 300ms
+   ${delay}ms both` — a short opacity + translateY slide-in staggered per row. */
+@keyframes timelineSlideIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================================================
    COMPONENT LAYER UTILITIES
    ============================================================================ */
 

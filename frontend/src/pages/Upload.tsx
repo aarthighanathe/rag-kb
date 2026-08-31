@@ -19,6 +19,7 @@ import { useAppToast } from '../contexts/ToastContext';
 import { estimateProcessingSeconds, formatETA } from '../utils/estimateETA';
 import { timeAgo } from '../utils/timeAgo';
 import { pluralize } from '../utils/pluralize';
+import { fmtBytes } from '../utils/documentFormatters';
 import { getDocument, type ChunkQualityStats, type DocumentRecord } from '../services/api';
 
 // ---------------------------------------------------------------------------
@@ -35,12 +36,6 @@ const ACCEPTED_TYPES = ['.pdf', '.txt', '.md', '.docx', '.html', '.htm'];
 const MAX_SIZE_MB = Number.parseInt(import.meta.env.VITE_MAX_FILE_SIZE_MB ?? '10', 10);
 const MAX_SIZE = MAX_SIZE_MB * 1024 * 1024;
 
-function fmtBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1_048_576).toFixed(1)} MB`;
-}
-
 function getExtBadgeStyle(name: string): React.CSSProperties {
   const ext = name.split('.').pop()?.toLowerCase();
   const styles: Record<string, React.CSSProperties> = {
@@ -48,6 +43,8 @@ function getExtBadgeStyle(name: string): React.CSSProperties {
     docx: { background: '#E3F2FD', color: '#0D47A1' },
     txt: { background: '#F3E5F5', color: '#6A1B9A' },
     md: { background: '#E8F5E9', color: '#1B5E20' },
+    html: { background: '#FCE4EC', color: '#AD1457' },
+    htm: { background: '#FCE4EC', color: '#AD1457' },
   };
   return styles[ext ?? ''] ?? { background: '#F0EDEA', color: '#5C5850' };
 }
@@ -285,13 +282,12 @@ function QueueRow({ item }: { item: UploadItem }): React.JSX.Element {
                       color: '#6B5B4E',
                     }}
                   >
-                    Chewing… ~
-                    {(() => {
-                      const elapsed = Date.now() - (item.processingStartedAt ?? 0);
-                      const eta = Math.max(0, 20 - elapsed / 1000);
-                      return formatETA(eta);
-                    })()}{' '}
-                    left
+                    Chewing…{' '}
+                    {etaText
+                      ? etaText === 'any moment now'
+                        ? etaText
+                        : `${etaText} left`
+                      : 'estimating…'}
                   </span>
                 )}
               </div>

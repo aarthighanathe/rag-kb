@@ -7,7 +7,7 @@
  * @updated 2026-06-30
  */
 
-import Groq from 'groq-sdk';
+import Groq, { APIError as GroqAPIError } from 'groq-sdk';
 import { type Response } from 'express';
 import { env } from '../config/env.js';
 import { LLMError, LLMErrorCode } from '../utils/errors.js';
@@ -16,7 +16,12 @@ import type { MatchChunksResult, SourceCitation } from '../types/index.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const MODEL_ID = 'openai/gpt-oss-20b';
+// Exported so answerValidator.ts and queryRewriter.ts — both of which make
+// their own separate Groq calls for auxiliary (non-primary-answer) purposes —
+// share this one definition instead of each hardcoding an identical literal
+// that would need to be updated in three places on a future model migration
+// (as already happened once per ADR-005: llama-3.1-8b-instant -> gpt-oss-20b).
+export const MODEL_ID = 'openai/gpt-oss-20b';
 
 /**
  * gpt-oss-20b is a reasoning model — without this, most of its output budget
@@ -26,7 +31,7 @@ const MODEL_ID = 'openai/gpt-oss-20b';
  * clean, complete `content` deltas suited to this app's low-latency
  * streaming RAG design (ADR-005).
  */
-const REASONING_EFFORT = 'low';
+export const REASONING_EFFORT = 'low';
 
 /** Default sampling temperature for RAG completions — low for factual precision. */
 const DEFAULT_TEMPERATURE = 0.1;
@@ -101,8 +106,6 @@ export interface RAGContext {
   chunks: MatchChunksResult[];
   /** The user's natural-language question. */
   query: string;
-  /** Sampling temperature (default 0.1). */
-  temperature?: number;
 }
 
 /** Callbacks for consuming a streamed LLM response. */
@@ -301,12 +304,13 @@ export function buildMessages(
  * @returns Array of citations in the same order as the input chunks
  */
 export function extractCitations(chunks: MatchChunksResult[]): SourceCitation[] {
-  return chunks.map((chunk) => ({
+  return chunks.map((chunk, i) => ({
     documentId: chunk.document_id,
     filename: chunk.filename,
     chunkId: chunk.id,
     similarity: Math.round(chunk.similarity * 1000) / 1000,
     excerpt: chunk.content.slice(0, 200) + (chunk.content.length > 200 ? '…' : ''),
+    citationNumber: i + 1,
   }));
 }
 
@@ -405,7 +409,6 @@ async function doGroqStream(
   options: StreamOptions,
   signal?: AbortSignal,
 ): Promise<void> {
-  const temperature = context.temperature ?? DEFAULT_TEMPERATURE;
   let fullText = '';
 
   const messages = buildMessages(context, history);
@@ -413,7 +416,7 @@ async function doGroqStream(
   const stream = await getGroqClient().chat.completions.create(
     {
       model: MODEL_ID,
-      temperature,
+      temperature: DEFAULT_TEMPERATURE,
       max_tokens: 1024,
       stream: true,
       messages,
@@ -440,6 +443,60 @@ async function doGroqStream(
 }
 
 /**
+ * Reads `.status` off a Groq APIError with an explicit, honest type.
+ * The SDK's generic `APIError<TStatus>` default parameter resolves to `any`
+ * for a plain `instanceof GroqAPIError` narrow (a known TS limitation with
+ * generic classes that have complex default type args), so every read of
+ * `.status` is funneled through here rather than re-triggering
+ * `no-unsafe-assignment` at each call site.
+ * @param err - The Groq SDK APIError to read the status from
+ * @returns The HTTP status code, or undefined if the SDK didn't set one
+ */
+function getGroqErrorStatus(err: GroqAPIError): number | undefined {
+  return err.status as number | undefined;
+}
+
+/**
+ * Classifies a Groq 400 response by its body's `code`/`type` fields to
+ * distinguish an over-length context from any other malformed request.
+ * @param err - The Groq SDK APIError with `.status === 400`
+ * @returns The LLMErrorCode and HTTP status to report for this failure
+ */
+function classifyGroq400Error(err: GroqAPIError): { code: LLMErrorCode; statusCode: number } {
+  const body = err.error as unknown as { code?: string; type?: string } | undefined;
+  const marker = `${body?.code ?? ''} ${body?.type ?? ''}`.toLowerCase();
+  if (marker.includes('context_length') || marker.includes('too_long')) {
+    return { code: LLMErrorCode.CONTEXT_TOO_LONG, statusCode: 400 };
+  }
+  return { code: LLMErrorCode.INVALID_RESPONSE, statusCode: 400 };
+}
+
+/**
+ * Maps a Groq API error to its LLMErrorCode/status pair, branching on the
+ * SDK's typed `.status` (and, for 400s, the error body's `code`/`type`
+ * fields) instead of collapsing every failure into one generic STREAM_FAILED
+ * — so on-call can tell "fix your key" (401) from "back off" (429) from
+ * "wrong model ID" (404) instead of seeing an identical 503 for all three.
+ * @param err - The Groq SDK APIError to classify
+ * @returns The LLMErrorCode and HTTP status to report for this failure
+ */
+function classifyGroqApiError(err: GroqAPIError): { code: LLMErrorCode; statusCode: number } {
+  switch (getGroqErrorStatus(err)) {
+    case 401:
+    case 403:
+      return { code: LLMErrorCode.AUTH_FAILED, statusCode: 401 };
+    case 429:
+      return { code: LLMErrorCode.RATE_LIMITED, statusCode: 429 };
+    case 404:
+      return { code: LLMErrorCode.MODEL_UNAVAILABLE, statusCode: 503 };
+    case 400:
+      return classifyGroq400Error(err);
+    default:
+      return { code: LLMErrorCode.STREAM_FAILED, statusCode: 503 };
+  }
+}
+
+/**
  * Handles errors during LLM streaming by wrapping them in LLMError and calling onError.
  */
 function handleStreamError(err: unknown, options: StreamOptions): never {
@@ -449,12 +506,22 @@ function handleStreamError(err: unknown, options: StreamOptions): never {
   }
 
   const message = err instanceof Error ? err.message : 'LLM streaming failed';
-  logger.error('Groq stream error', { error: message });
+  const { code, statusCode, groqStatus } =
+    err instanceof GroqAPIError
+      ? { ...classifyGroqApiError(err), groqStatus: getGroqErrorStatus(err) }
+      : { code: LLMErrorCode.STREAM_FAILED, statusCode: 503, groqStatus: undefined };
+
+  logger.error('Groq stream error', {
+    error: message,
+    code,
+    statusCode,
+    groqStatus,
+  });
 
   const llmErr = new LLMError(
     `LLM streaming failed: ${message}`,
-    LLMErrorCode.STREAM_FAILED,
-    503,
+    code,
+    statusCode,
     err instanceof Error ? err : undefined,
   );
   options.onError(llmErr);

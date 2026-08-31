@@ -15,17 +15,19 @@
  */
 
 import { logger } from '../utils/logger.js';
-import { getGroqClient } from './llm.js';
+import { getGroqClient, MODEL_ID, REASONING_EFFORT } from './llm.js';
 import type { RetrievedChunk } from '../types/index.js';
 
 // ─── Configuration ─────────────────────────────────────────────────────────────
 
 const VALIDATION_CONFIG = {
-  // Same model used for generation (ADR-005, llm.ts).
-  model: 'openai/gpt-oss-20b',
+  // Same model used for generation (ADR-005) — imported from llm.ts rather
+  // than a separately-hardcoded literal, so a model migration only requires
+  // updating one place.
+  model: MODEL_ID,
   // See llm.ts's REASONING_EFFORT comment — keeps reasoning-token overhead
   // minimal on this reasoning model.
-  reasoningEffort: 'low',
+  reasoningEffort: REASONING_EFFORT,
   temperature: 0.1,
   maxTokens: 512,
   minConfidence: 0.6,
@@ -124,6 +126,36 @@ function normalizeIssue(
   return issue;
 }
 
+/**
+ * Parses and normalizes the raw JSON content returned by the validation
+ * model into a well-formed result shape.
+ * @param content - Raw JSON string from the validation model's response
+ * @returns Normalized issues, clamped confidence, suggestions, and isValid flag
+ */
+function parseValidationResponse(content: string): {
+  issues: ValidationIssue[];
+  confidence: number;
+  suggestions: string[];
+  isValid: boolean;
+} {
+  const validationData = JSON.parse(content) as RawValidationResponse;
+
+  const issues: ValidationIssue[] = (validationData.issues ?? []).map(normalizeIssue);
+  // Clamp to [0, 1] — only missing/null is guarded by `??`; the model can
+  // still return an out-of-range or non-finite value (e.g. 1.5, NaN),
+  // which must never be persisted or rendered verbatim as an impossible
+  // "150% confidence".
+  const rawConfidence = validationData.confidence;
+  const confidence =
+    typeof rawConfidence === 'number' && Number.isFinite(rawConfidence)
+      ? Math.min(1, Math.max(0, rawConfidence))
+      : 0.5;
+  const suggestions = validationData.suggestions ?? [];
+  const isValid = confidence >= VALIDATION_CONFIG.minConfidence;
+
+  return { issues, confidence, suggestions, isValid };
+}
+
 // ─── Validation Functions ───────────────────────────────────────────────────────
 
 /**
@@ -172,12 +204,7 @@ export async function validateAnswer(
       throw new Error('No response content from validation model');
     }
 
-    const validationData = JSON.parse(content) as RawValidationResponse;
-
-    const issues: ValidationIssue[] = (validationData.issues ?? []).map(normalizeIssue);
-    const confidence = validationData.confidence ?? 0.5;
-    const suggestions = validationData.suggestions ?? [];
-    const isValid = confidence >= VALIDATION_CONFIG.minConfidence;
+    const { issues, confidence, suggestions, isValid } = parseValidationResponse(content);
 
     const durationMs = Date.now() - startTime;
 
@@ -201,20 +228,4 @@ export async function validateAnswer(
     // answer the user has already received.
     return { isValid: true, confidence: 0.5, issues: [], suggestions: [], durationMs };
   }
-}
-
-/**
- * Generates a short validation summary string for logging.
- * @param result - A completed ValidationResult
- * @returns One-line human-readable summary
- */
-export function generateValidationSummary(result: ValidationResult): string {
-  if (result.isValid) {
-    return `Valid (confidence: ${result.confidence.toFixed(2)})`;
-  }
-
-  const highSeverityIssues = result.issues.filter((i) => i.severity === 'high');
-  const mediumSeverityIssues = result.issues.filter((i) => i.severity === 'medium');
-
-  return `Invalid (confidence: ${result.confidence.toFixed(2)}, ${highSeverityIssues.length} high, ${mediumSeverityIssues.length} medium issues)`;
 }

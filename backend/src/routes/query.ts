@@ -459,43 +459,55 @@ async function streamGeneratedAnswer(
         // historical fire-and-forget pattern) because the client needs the
         // inserted row's id in the `complete` payload.
         void (async (): Promise<void> => {
-          const queryLogId = await logQuery({
-            query_text: safeQuery,
-            retrieved_chunk_ids: chunks.map((c) => c.id),
-            response_preview: fullText.slice(0, 200),
-            latency_ms: Date.now() - startTime,
-            user_id: userId,
-          }).catch((err: unknown) => {
-            ctx.requestLogger.warn('Failed to log query', {
+          // The whole body is wrapped so a thrown error (not just logQuery's
+          // own rejection) can never leave endStream()/the SSE connection
+          // hanging until SSE_TIMEOUT_MS forces it closed — finally guarantees
+          // the stream is always terminated exactly once.
+          try {
+            const queryLogId = await logQuery({
+              query_text: safeQuery,
+              retrieved_chunk_ids: chunks.map((c) => c.id),
+              response_preview: fullText.slice(0, 200),
+              latency_ms: Date.now() - startTime,
+              user_id: userId,
+            }).catch((err: unknown) => {
+              ctx.requestLogger.warn('Failed to log query', {
+                error: err instanceof Error ? err.message : String(err),
+              });
+              return null;
+            });
+            const citedChips = filterCitationsByModelOutput(citationChips, fullText);
+            ctx.emit('complete', { type: 'complete', citations: citedChips, queryLogId });
+            ctx.requestLogger.info('Query stream completed', {
+              queryId: ctx.queryId,
+              chunkCount: chunks.length,
+              historyLength: history.length,
+            });
+
+            // Fired after the stream has already closed — never awaited on the
+            // response path. Runs a second (fast-model) Groq call to fact-check
+            // the answer the user already saw, purely for later display (e.g. a
+            // confidence badge on query history). Gated behind
+            // ANSWER_VALIDATION_ENABLED so operators can disable the extra
+            // Groq call (latency + cost) without a code deploy.
+            if (queryLogId && env.ANSWER_VALIDATION_ENABLED) {
+              void validateAnswer(safeQuery, fullText, chunks)
+                .then((result) =>
+                  setQueryValidation(queryLogId, result.confidence, result.issues.length),
+                )
+                .catch((err: unknown) => {
+                  ctx.requestLogger.warn('Post-hoc answer validation failed', {
+                    error: err instanceof Error ? err.message : String(err),
+                  });
+                });
+            }
+          } catch (err) {
+            ctx.requestLogger.error('Unexpected error finalizing query stream', {
+              queryId: ctx.queryId,
               error: err instanceof Error ? err.message : String(err),
             });
-            return null;
-          });
-          const citedChips = filterCitationsByModelOutput(citationChips, fullText);
-          ctx.emit('complete', { type: 'complete', citations: citedChips, queryLogId });
-          ctx.endStream();
-          ctx.requestLogger.info('Query stream completed', {
-            queryId: ctx.queryId,
-            chunkCount: chunks.length,
-            historyLength: history.length,
-          });
-
-          // Fired after the stream has already closed — never awaited on the
-          // response path. Runs a second (fast-model) Groq call to fact-check
-          // the answer the user already saw, purely for later display (e.g. a
-          // confidence badge on query history). Gated behind
-          // ANSWER_VALIDATION_ENABLED so operators can disable the extra
-          // Groq call (latency + cost) without a code deploy.
-          if (queryLogId && env.ANSWER_VALIDATION_ENABLED) {
-            void validateAnswer(safeQuery, fullText, chunks)
-              .then((result) =>
-                setQueryValidation(queryLogId, result.confidence, result.issues.length),
-              )
-              .catch((err: unknown) => {
-                ctx.requestLogger.warn('Post-hoc answer validation failed', {
-                  error: err instanceof Error ? err.message : String(err),
-                });
-              });
+          } finally {
+            ctx.endStream();
           }
         })();
       },

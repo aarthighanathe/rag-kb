@@ -171,16 +171,32 @@ describe('POST /api/upload', () => {
       expect(res.body.correlationId).toBeDefined();
     });
 
-    it('returns 400 when file MIME type is not allowed by the allow-list', async () => {
+    it('returns 422 when file MIME type is not allowed by the allow-list', async () => {
       const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
       const res = await authedRequest(app)
         .post('/api/upload')
         .attach('files', pngBuffer, { filename: 'image.png', contentType: 'image/png' })
-        .expect(400);
+        .expect(422);
 
       expect(res.body.success).toBe(false);
-      expect(res.body.error.message).toMatch(/Unsupported MIME type/i);
+      expect(res.body.error.message).toMatch(/Validation failed/i);
+    });
+
+    it('isolates a bad-MIME file from otherwise-valid files in the same batch (207)', async () => {
+      const pngBuffer = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+      const res = await authedRequest(app)
+        .post('/api/upload')
+        .attach('files', PDF_BUFFER, { filename: 'good.pdf', contentType: 'application/pdf' })
+        .attach('files', pngBuffer, { filename: 'image.png', contentType: 'image/png' })
+        .attach('files', TXT_BUFFER, { filename: 'good2.txt', contentType: 'text/plain' })
+        .expect(207);
+
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.documents).toHaveLength(2);
+      expect(res.body.data.errors).toHaveLength(1);
+      expect(res.body.data.errors[0].filename).toBe('image.png');
     });
 
     it('returns 400 when magic bytes do not match the declared extension', async () => {
@@ -241,7 +257,7 @@ describe('POST /api/upload', () => {
       const res = await authedRequest(app)
         .post('/api/upload')
         .attach('files', pngBuffer, { filename: 'image.png', contentType: 'image/png' })
-        .expect(400);
+        .expect(422);
 
       expect(res.body).toMatchObject({
         success: false,

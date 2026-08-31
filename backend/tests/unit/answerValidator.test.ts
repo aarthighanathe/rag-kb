@@ -28,7 +28,7 @@ vi.mock('../../src/utils/logger', () => ({
 
 // ─── Import module under test (after mocks) ───────────────────────────────────
 
-import { validateAnswer, generateValidationSummary } from '../../src/services/answerValidator';
+import { validateAnswer } from '../../src/services/answerValidator';
 
 function makeChunk(overrides: Partial<RetrievedChunk> = {}): RetrievedChunk {
   return {
@@ -79,6 +79,36 @@ describe('validateAnswer', () => {
     expect(result.confidence).toBe(0.92);
     expect(result.issues).toEqual([]);
     expect(mockCreate).toHaveBeenCalledOnce();
+  });
+
+  it('clamps a confidence value above 1 to 1', async () => {
+    mockCreate.mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({ issues: [], confidence: 1.5 }) } }],
+    });
+
+    const result = await validateAnswer('query', 'answer', [makeChunk()]);
+
+    expect(result.confidence).toBe(1);
+  });
+
+  it('clamps a negative confidence value to 0', async () => {
+    mockCreate.mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({ issues: [], confidence: -0.4 }) } }],
+    });
+
+    const result = await validateAnswer('query', 'answer', [makeChunk()]);
+
+    expect(result.confidence).toBe(0);
+  });
+
+  it('defaults to 0.5 when confidence is a non-finite or non-numeric value', async () => {
+    mockCreate.mockResolvedValue({
+      choices: [{ message: { content: JSON.stringify({ issues: [], confidence: 'high' }) } }],
+    });
+
+    const result = await validateAnswer('query', 'answer', [makeChunk()]);
+
+    expect(result.confidence).toBe(0.5);
   });
 
   it('flags an answer with issues as invalid when confidence is below threshold', async () => {
@@ -151,35 +181,5 @@ describe('validateAnswer', () => {
     const result = await validateAnswer('query', 'answer', [makeChunk()]);
 
     expect(result.isValid).toBe(true);
-  });
-});
-
-describe('generateValidationSummary', () => {
-  it('summarizes a valid result', () => {
-    const summary = generateValidationSummary({
-      isValid: true,
-      confidence: 0.9,
-      issues: [],
-      suggestions: [],
-      durationMs: 10,
-    });
-    expect(summary).toContain('Valid');
-    expect(summary).toContain('0.90');
-  });
-
-  it('summarizes an invalid result with issue counts by severity', () => {
-    const summary = generateValidationSummary({
-      isValid: false,
-      confidence: 0.4,
-      issues: [
-        { type: 'hallucination', severity: 'high', message: 'x' },
-        { type: 'inconsistency', severity: 'medium', message: 'y' },
-      ],
-      suggestions: [],
-      durationMs: 10,
-    });
-    expect(summary).toContain('Invalid');
-    expect(summary).toContain('1 high');
-    expect(summary).toContain('1 medium');
   });
 });

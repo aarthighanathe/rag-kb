@@ -218,7 +218,12 @@ async function processDocumentJob(
  * job's stable ID, aborting whatever controller was previously registered for
  * that ID — so if BullMQ starts a retry while a prior attempt is still
  * winding down past its own timeout, the prior attempt is aborted the instant
- * the retry begins, not just when its own timer eventually fires.
+ * the retry begins, not just when its own timer eventually fires. This
+ * unconditionally supersedes whatever the worker's `'active'` event handler
+ * pre-registered for this same attempt (see the `'active'` listener below) —
+ * that earlier registration only exists to close the external-cancel race
+ * during the gap before this function runs; once this function has its own
+ * controller, that earlier one no longer matters to anything.
  * BullMQ will still apply its own retry logic on the re-thrown error.
  */
 async function timedDocumentJob(
@@ -253,6 +258,15 @@ export const documentWorker = new Worker<DocumentJobData, DocumentJobResult>(
     lockDuration: JOB_TIMEOUT_MS + 30_000,
   },
 );
+
+// Registers this attempt's AbortController the instant BullMQ marks the job
+// active in Redis — well before timedDocumentJob's processor body runs — so
+// cancelDocumentJob (DELETE /api/documents/:id) can find and abort it
+// immediately instead of racing against the processor's own startup.
+documentWorker.on('active', (job) => {
+  const jobId = job.id ?? `unknown-${job.data.documentId}`;
+  beginAttempt(jobId);
+});
 
 documentWorker.on('completed', (job) => {
   logger.info('Worker: job completed', {

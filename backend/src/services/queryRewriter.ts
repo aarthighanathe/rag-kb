@@ -17,12 +17,7 @@
 
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
-import { getGroqClient } from './llm.js';
-
-const MODEL_ID = 'openai/gpt-oss-20b';
-
-/** See llm.ts's REASONING_EFFORT comment — keeps reasoning-token overhead minimal on this reasoning model. */
-const REASONING_EFFORT = 'low';
+import { getGroqClient, MODEL_ID, REASONING_EFFORT } from './llm.js';
 
 /** Low temperature and a small token budget — this is a short reformulation, not an answer. */
 const REWRITE_TEMPERATURE = 0.2;

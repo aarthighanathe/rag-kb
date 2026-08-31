@@ -101,9 +101,16 @@ export function createApp(): Application {
   // requireAuth gates every route below except GET /api/query/stream, which is opened
   // via native EventSource (cannot send an Authorization header) — see query.ts for
   // how that route inherits its caller's identity from the authenticated POST instead.
-  app.use('/api/upload', uploadRateLimit, requireAuth, uploadRouter);
+  //
+  // requireAuth runs *before* the rate limiter on upload/documents (not after, as
+  // you'd naively order "auth then throttle") so each limiter's keyGenerator can key
+  // by req.auth.userId instead of falling back to IP — see rateLimit.ts's
+  // keyByUserOrIp. POST /api/query keeps requireAuth inside query.ts itself (that
+  // router also serves the unauthenticated GET /stream route), so its limiter stays
+  // IP-only.
+  app.use('/api/upload', requireAuth, uploadRateLimit, uploadRouter);
   app.use('/api/query', queryRateLimit, queryRouter);
-  app.use('/api/documents', documentsRateLimit, requireAuth, documentsRouter);
+  app.use('/api/documents', requireAuth, documentsRateLimit, documentsRouter);
   // Admin queue endpoints: strict rate limit (20/window) to deter brute-forcing the admin secret
   app.use('/api/queue', adminRateLimit, queueRouter);
 

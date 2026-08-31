@@ -58,7 +58,13 @@ function fileTypeToColor(fileType: string): string {
 
 // ─── Tooltip ────────────────────────────────────────────────────────────────
 
-function Tooltip({ node, position }: { node: LayoutNode; position: { x: number; y: number } }): ReactNode {
+function Tooltip({
+  node,
+  position,
+}: {
+  node: LayoutNode;
+  position: { x: number; y: number };
+}): ReactNode {
   return (
     <div
       style={{
@@ -68,13 +74,13 @@ function Tooltip({ node, position }: { node: LayoutNode; position: { x: number; 
         background: INK_BASE,
         color: PAPER_BASE,
         padding: '6px 10px',
-        borderRadius: 6,
+        borderRadius: 2,
         fontSize: 12,
         fontFamily: "'Space Grotesk', sans-serif",
         whiteSpace: 'nowrap',
         pointerEvents: 'none',
         zIndex: 20,
-        boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+        boxShadow: '0 4px 16px rgba(28,27,25,0.12)',
       }}
     >
       <div style={{ fontWeight: 600 }}>{node.filename}</div>
@@ -102,7 +108,7 @@ function Legend({ documents }: { documents: DocumentRecord[] }): ReactNode {
         padding: '8px 12px',
         background: PAPER_BASE,
         border: `1px solid ${INK_BORDER}`,
-        borderRadius: 6,
+        borderRadius: 4,
         fontSize: 11,
         fontFamily: "'Space Mono', monospace",
         color: INK_MUTED,
@@ -150,6 +156,10 @@ export function DocumentRelationMap({
   height = 500,
 }: DocumentRelationMapProps): ReactNode {
   const [selectedNode, setSelectedNode] = useState<LayoutNode | null>(null);
+  // True when selectedNode was pinned by a click (detail panel), as opposed
+  // to merely hovered (tooltip) — lets handleNodeLeave dismiss a hover
+  // tooltip on mouse-leave without also closing a click-pinned detail panel.
+  const [isPinned, setIsPinned] = useState(false);
   const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
   const [reducedMotion, setReducedMotion] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -200,40 +210,45 @@ export function DocumentRelationMap({
   const handleNodeClick = useCallback(
     (node: LayoutNode, event: React.SyntheticEvent) => {
       event.stopPropagation();
-      if (selectedNode?.id === node.id) {
+      if (isPinned && selectedNode?.id === node.id) {
         setSelectedNode(null);
         setTooltipPos(null);
+        setIsPinned(false);
       } else {
         setSelectedNode(node);
+        setIsPinned(true);
       }
     },
-    [selectedNode],
+    [selectedNode, isPinned],
   );
 
   // Node hover — show tooltip
-  const handleNodeEnter = useCallback((node: LayoutNode, event: React.MouseEvent) => {
-    if (selectedNode) return; // skip tooltip when detail panel open
-    setTooltipPos({ x: event.clientX, y: event.clientY });
-    setSelectedNode(node);
-  }, [selectedNode]);
+  const handleNodeEnter = useCallback(
+    (node: LayoutNode, event: React.MouseEvent) => {
+      if (isPinned) return; // skip tooltip when detail panel open
+      setTooltipPos({ x: event.clientX, y: event.clientY });
+      setSelectedNode(node);
+    },
+    [isPinned],
+  );
 
   const handleNodeLeave = useCallback(() => {
-    if (!selectedNode) return;
-    // Only clear if not clicked (clicked = detail panel stays)
-  }, [selectedNode]);
+    if (isPinned) return; // clicked = detail panel stays open
+    setSelectedNode(null);
+    setTooltipPos(null);
+  }, [isPinned]);
 
   // SVG click background — deselect
   const handleBgClick = useCallback(() => {
     setSelectedNode(null);
     setTooltipPos(null);
+    setIsPinned(false);
   }, []);
 
   // Detail panel data
   const selectedEdge = useMemo(() => {
     if (!selectedNode) return null;
-    return layoutEdges.filter(
-      (e) => e.source === selectedNode.id || e.target === selectedNode.id,
-    );
+    return layoutEdges.filter((e) => e.source === selectedNode.id || e.target === selectedNode.id);
   }, [selectedNode, layoutEdges]);
 
   return (
@@ -248,11 +263,14 @@ export function DocumentRelationMap({
           marginBottom: 8,
           background: PAPER_BASE,
           border: `1px solid ${INK_BORDER}`,
-          borderRadius: 6,
+          borderRadius: 4,
           fontSize: 13,
         }}
       >
-        <span data-testid={STAT_TOTAL_DOCS} style={{ fontFamily: "'Space Mono', monospace", color: INK_MUTED }}>
+        <span
+          data-testid={STAT_TOTAL_DOCS}
+          style={{ fontFamily: "'Space Mono', monospace", color: INK_MUTED }}
+        >
           {documents.length} documents — {pairs.length} relationships
         </span>
         {onRecompute && (
@@ -289,7 +307,7 @@ export function DocumentRelationMap({
           height: 'auto',
           background: PAPER_BASE,
           border: `1px solid ${INK_BORDER}`,
-          borderRadius: 6,
+          borderRadius: 4,
           cursor: 'crosshair',
         }}
         onClick={handleBgClick}
@@ -328,7 +346,7 @@ export function DocumentRelationMap({
         {/* Node layer */}
         <g>
           {nodes.map((node) => {
-            const isSelected = selectedNode?.id === node.id;
+            const isSelected = isPinned && selectedNode?.id === node.id;
             return (
               <g
                 key={node.id}
@@ -410,7 +428,7 @@ export function DocumentRelationMap({
       </svg>
 
       {/* Tooltip (hover) */}
-      {tooltipPos && selectedNode && !selectedEdge?.length && (
+      {tooltipPos && selectedNode && !isPinned && (
         <Tooltip node={selectedNode} position={tooltipPos} />
       )}
 
@@ -425,20 +443,29 @@ export function DocumentRelationMap({
             width: 240,
             background: PAPER_BASE,
             border: `1px solid ${INK_BORDER}`,
-            borderRadius: 8,
+            borderRadius: 2,
             padding: 12,
-            boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+            boxShadow: '0 4px 16px rgba(28,27,25,0.12)',
             fontSize: 12,
             fontFamily: "'Space Mono', monospace",
             maxHeight: 300,
             overflowY: 'auto',
           }}
         >
-          <div style={{ fontWeight: 700, marginBottom: 6, color: INK_BASE, fontFamily: "'Space Grotesk', sans-serif", fontSize: 14 }}>
+          <div
+            style={{
+              fontWeight: 700,
+              marginBottom: 6,
+              color: INK_BASE,
+              fontFamily: "'Space Grotesk', sans-serif",
+              fontSize: 14,
+            }}
+          >
             {selectedNode.filename}
           </div>
           <div style={{ color: INK_MUTED, marginBottom: 8 }}>
-            {selectedNode.fileType.split('/').pop()?.toUpperCase()} — {selectedNode.chunkCount} chunks
+            {selectedNode.fileType.split('/').pop()?.toUpperCase()} — {selectedNode.chunkCount}{' '}
+            chunks
           </div>
           <div style={{ color: INK_MUTED, marginBottom: 4, fontWeight: 600 }}>
             Connected documents:
@@ -457,7 +484,15 @@ export function DocumentRelationMap({
                   borderBottom: `1px solid ${INK_HINT}`,
                 }}
               >
-                <span style={{ color: INK_BASE, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }}>
+                <span
+                  style={{
+                    color: INK_BASE,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    maxWidth: 140,
+                  }}
+                >
                   {otherNode?.filename ?? otherId}
                 </span>
                 <span
@@ -473,7 +508,6 @@ export function DocumentRelationMap({
           })}
         </div>
       )}
-
     </div>
   );
 }

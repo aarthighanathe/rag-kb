@@ -15,7 +15,7 @@ vi.mock('../../src/utils/logger', () => ({
   logger: { debug: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
-import { validate, validateBody, validateQuery, validateParams } from '../../src/middleware/validate';
+import { validate } from '../../src/middleware/validate';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -163,44 +163,6 @@ describe('validate — default target', () => {
     validate(schema)(req, noopRes, next);
 
     expect(next).toHaveBeenCalledWith();
-  });
-});
-
-describe('validateBody / validateQuery / validateParams convenience wrappers', () => {
-  it('validateBody validates req.body', () => {
-    const schema = z.object({ name: z.string() });
-    const req = makeReq({ body: { name: 'Alice' } });
-    const next = vi.fn() as unknown as NextFunction;
-
-    validateBody(schema)(req, noopRes, next);
-
-    expect(next).toHaveBeenCalledWith();
-    expect(req.body).toEqual({ name: 'Alice' });
-  });
-
-  it('validateParams validates req.params', () => {
-    const schema = z.object({ id: z.string() });
-    const req = makeReq({ params: { id: 'abc' } });
-    const next = vi.fn() as unknown as NextFunction;
-
-    validateParams(schema)(req, noopRes, next);
-
-    expect(next).toHaveBeenCalledWith();
-    expect(req.params).toEqual({ id: 'abc' });
-  });
-
-  it('validateQuery validates the getter-only req.query', () => {
-    const schema = z.object({ q: z.string() });
-    const req = makeReq();
-    Object.defineProperty(req, 'query', {
-      value: { q: 'hello' }, writable: false, configurable: true, enumerable: true,
-    });
-    const next = vi.fn() as unknown as NextFunction;
-
-    validateQuery(schema)(req, noopRes, next);
-
-    expect(next).toHaveBeenCalledWith();
-    expect(req.query).toEqual({ q: 'hello' });
   });
 });
 

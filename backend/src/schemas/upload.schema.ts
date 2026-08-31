@@ -31,16 +31,3 @@ export const UploadFileSchema = z.object({
 });
 
 export type UploadFile = z.infer<typeof UploadFileSchema>;
-
-/**
- * Schema for the array of multer files on req.files.
- * Validates the wrapped { files } object so it can be used with safeParse.
- */
-export const UploadRequestSchema = z.object({
-  files: z
-    .array(UploadFileSchema)
-    .min(1, 'At least one file is required')
-    .max(5, 'At most 5 files may be uploaded per request'),
-});
-
-export type UploadRequest = z.infer<typeof UploadRequestSchema>;

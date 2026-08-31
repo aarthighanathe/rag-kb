@@ -12,6 +12,7 @@ import {
   useRef,
   useState,
   useCallback,
+  useMemo,
   type FormEvent,
   type KeyboardEvent,
 } from 'react';
@@ -50,6 +51,7 @@ import {
 } from '../utils/exportConversation';
 import { toChatCitation } from '../utils/chatCitations';
 import { pluralize } from '../utils/pluralize';
+import { clientLog } from '../utils/clientLogger';
 
 const SUGGESTED_QUERIES = [
   'Summarize all uploaded documents',
@@ -71,7 +73,11 @@ const MIN_QUERY_LENGTH = 3;
 export function Chat(): React.JSX.Element {
   const [inputValue, setInputValue] = useState('');
   const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
-  const [streamPhase, setStreamPhase] = useState<StreamPhase>('idle');
+  // True once the 'generating' SSE event has fired for the current query —
+  // the one bit of granularity StatusBar needs (distinguishing "sources
+  // found, about to generate" from "actively writing the answer") that
+  // queryPhase's coarser 'streaming' value doesn't carry on its own.
+  const [isGenerating, setIsGenerating] = useState(false);
   const [foundCount, setFoundCount] = useState(0);
   // Not React state: 'complete' sets this and calls onComplete in the same
   // synchronous tick, before React re-renders, so a state-based value read
@@ -187,33 +193,50 @@ export function Chat(): React.JSX.Element {
 
   const sseUrl = currentQueryId ? getQueryStreamUrl(currentQueryId) : null;
 
+  // Derived from the store's queryPhase (single source of truth) plus the
+  // one extra bit of granularity StatusBar needs beyond it — avoids
+  // maintaining a second, independently-set phase state machine that can
+  // silently drift from queryPhase's vocabulary (as happened previously:
+  // this handler set queryPhase: 'complete' on finish while the old local
+  // streamPhase state went to 'idle', so StatusBar and SourcePanel disagreed
+  // about what "done" meant for the same stream).
+  const streamPhase: StreamPhase = useMemo(() => {
+    if (queryPhase === 'idle' || queryPhase === 'complete') return 'idle';
+    if (queryPhase === 'searching') return 'searching';
+    return isGenerating ? 'generating' : 'found';
+  }, [queryPhase, isGenerating]);
+
   const handleSSEEvent = useCallback(
     (event: SSEEvent) => {
       switch (event.type) {
         case 'searching':
-          setStreamPhase('searching');
+          setIsGenerating(false);
           useRagStore.setState({ queryPhase: 'searching', liveChunks: [] });
           break;
         case 'found': {
           const chunks = safeParseCitations(event.data['chunks']);
-          const citations: Citation[] = chunks.map((s, i) => ({
+          const citations: Citation[] = chunks.map((s) => ({
             documentId: s.documentId,
             documentName: s.filename,
             chunkId: s.chunkId,
-            chunkRef: `Chunk ${i + 1}`,
+            chunkRef: `Chunk ${s.citationNumber}`,
             similarity: s.similarity,
             excerpt: s.excerpt,
+            citationNumber: s.citationNumber,
           }));
           setFoundCount(chunks.length);
-          setStreamPhase('found');
           useRagStore.setState({ queryPhase: 'streaming', liveChunks: citations });
           break;
         }
         case 'generating':
-          setStreamPhase('generating');
+          setIsGenerating(true);
           break;
         case 'token':
-          if (typeof event.data['content'] === 'string') appendStreamToken(event.data['content']);
+          if (typeof event.data['content'] === 'string') {
+            appendStreamToken(event.data['content']);
+          } else {
+            clientLog('warn', 'Dropped malformed token SSE event (non-string content)', event.data);
+          }
           break;
         case 'complete': {
           // queryLogId is the query_logs row id — the handle used later by
@@ -247,7 +270,7 @@ export function Chat(): React.JSX.Element {
           const msg =
             typeof event.data['message'] === 'string' ? event.data['message'] : 'Stream error';
           setStreamingError(msg);
-          setStreamPhase('idle');
+          setIsGenerating(false);
           useRagStore.setState({ queryPhase: 'idle' });
           break;
         }
@@ -257,17 +280,28 @@ export function Chat(): React.JSX.Element {
   );
 
   const handleSSEComplete = useCallback(() => {
-    const startTs = messages[messages.length - 2]?.timestamp ?? Date.now();
+    // The streaming assistant message's own `timestamp` is set at creation
+    // time in sendQuery (see ragStore.ts), before the query is even
+    // submitted — i.e. it already *is* the query's start time. Look it up
+    // by role + isStreaming rather than assuming it's always exactly two
+    // slots before the end of the array (that positional assumption breaks
+    // if the array shape ever changes, e.g. system messages, multi-turn
+    // batching).
+    const streamingAssistant = [...messages]
+      .reverse()
+      .find((m) => m.role === 'assistant' && m.isStreaming);
+    const startTs = streamingAssistant?.timestamp ?? Date.now();
     const latencyMs = Date.now() - startTs;
     finalizeStreamingMessage(latencyMs, pendingQueryLogIdRef.current);
     pendingQueryLogIdRef.current = null;
-    setStreamPhase('idle');
+    setIsGenerating(false);
   }, [finalizeStreamingMessage, messages]);
 
   const handleSSEError = useCallback(
     (error: Error) => {
       setStreamingError(error.message);
-      setStreamPhase('idle');
+      setIsGenerating(false);
+      useRagStore.setState({ queryPhase: 'idle' });
     },
     [setStreamingError],
   );
@@ -434,7 +468,7 @@ export function Chat(): React.JSX.Element {
 
   const handleStop = useCallback(() => {
     disconnect();
-    setStreamPhase('idle');
+    setIsGenerating(false);
     finalizeStreamingMessage(null);
   }, [disconnect, finalizeStreamingMessage]);
 
@@ -1099,8 +1133,6 @@ export function Chat(): React.JSX.Element {
                           key={msg.id}
                           role={msg.role}
                           content={msg.content}
-                          streaming={msg.isStreaming}
-                          citations={msg.citations?.map((c) => toChatCitation(c))}
                           timestamp={new Date(msg.timestamp).toISOString()}
                         />
                       );
@@ -1141,10 +1173,7 @@ export function Chat(): React.JSX.Element {
                   ◎ {exchangeCount}-turn thread
                   <button
                     type="button"
-                    onClick={() => {
-                      clearHistory();
-                      clearChat();
-                    }}
+                    onClick={handleNewConversation}
                     style={{
                       fontFamily: "'Space Mono', monospace",
                       fontSize: '10px',
@@ -1157,7 +1186,7 @@ export function Chat(): React.JSX.Element {
                     }}
                     aria-label="Clear conversation thread"
                   >
-                    Clear →
+                    {confirmingClear ? 'Sure? Click again' : 'Clear →'}
                   </button>
                 </span>
               </div>

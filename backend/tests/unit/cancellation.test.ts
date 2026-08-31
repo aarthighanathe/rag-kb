@@ -158,3 +158,14 @@ describe('cancelJob', () => {
     endAttempt('job-i2', other);
   });
 });
+
+describe('beginAttempt called twice back-to-back for the same job ID (e.g. by an \'active\' pre-registration followed by the processor\'s own call)', () => {
+  it('supersedes the first registration — the second call always wins, matching normal retry-supersession semantics', () => {
+    const preRegistered = beginAttempt('job-j');
+    const processorOwned = beginAttempt('job-j');
+
+    expect(preRegistered.signal.aborted).toBe(true);
+    expect(processorOwned.signal.aborted).toBe(false);
+    endAttempt('job-j', processorOwned);
+  });
+});

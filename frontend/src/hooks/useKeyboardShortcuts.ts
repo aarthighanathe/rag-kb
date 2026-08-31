@@ -32,10 +32,7 @@ export interface ShortcutHandlers {
  * @param handlers - Callback functions for each shortcut action
  * @param enabled - Whether shortcuts are active (false during streaming)
  */
-export function useKeyboardShortcuts(
-  handlers: ShortcutHandlers,
-  enabled: boolean,
-): void {
+export function useKeyboardShortcuts(handlers: ShortcutHandlers, enabled: boolean): void {
   useEffect(() => {
     if (!enabled) return;
 
@@ -46,10 +43,13 @@ export function useKeyboardShortcuts(
       // so compare case-insensitively rather than against a lowercase literal.
       const lowerKey = key.toLowerCase();
 
-      // Check if target is an input/textarea/select that is NOT the query input
+      // Check if target is an input/textarea that is NOT the query input.
+      // (No SELECT check here — the Chat page, the only page this hook is
+      // active on, has no <select> element.)
       const target = event.target as HTMLElement;
-      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT';
-      const isQueryInput = target.getAttribute && target.getAttribute('data-testid') === 'query-input';
+      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
+      const isQueryInput =
+        target.getAttribute && target.getAttribute('data-testid') === 'query-input';
 
       // Skip shortcuts if typing in unrelated input
       if (isInput && !isQueryInput) return;

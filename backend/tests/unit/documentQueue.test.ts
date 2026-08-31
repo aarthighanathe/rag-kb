@@ -296,15 +296,16 @@ describe('cancelDocumentJob', () => {
     await expect(cancelDocumentJob('doc-lockrace-123')).resolves.toBeUndefined();
   });
 
-  it('retries the in-flight abort for an active job with no registered controller yet, and succeeds once it appears', async () => {
-    // First call (before the job starts) finds nothing registered; state is
-    // 'active' in Redis (the worker claimed it) but beginAttempt() hasn't run
-    // yet — a narrow startup race. The retry loop should keep polling
-    // cancelInFlightAttempt until it succeeds, rather than silently no-op'ing.
+  it('cancels an active job in a single direct call — documentWorker registers the controller synchronously on BullMQ\'s \'active\' event, before this ever runs', async () => {
+    // The initial cancelInFlightAttempt call in cancelDocumentJob (line 116)
+    // already found nothing (that's why we got this far to check getState).
+    // The second call, once state is confirmed 'active', now succeeds
+    // immediately with no retry loop needed — registration happened
+    // synchronously in the worker's 'active' handler before getState() could
+    // ever observe 'active'.
     mockCancelInFlightAttempt
       .mockReturnValueOnce(false) // initial call in cancelDocumentJob
-      .mockReturnValueOnce(false) // retry 1
-      .mockReturnValueOnce(true); // retry 2 — controller now registered
+      .mockReturnValueOnce(true); // cancelActiveJob's direct call
     mockJobGetJob.mockResolvedValueOnce({
       getState: vi.fn().mockResolvedValue('active'),
       remove: mockJobRemove,
@@ -312,18 +313,18 @@ describe('cancelDocumentJob', () => {
 
     await cancelDocumentJob('doc-active-race-123');
 
-    expect(mockCancelInFlightAttempt).toHaveBeenCalledTimes(3);
+    expect(mockCancelInFlightAttempt).toHaveBeenCalledTimes(2);
     expect(mockJobRemove).not.toHaveBeenCalled();
-  }, 10000);
+  });
 
-  it('gives up and logs a warning if an active job never registers a controller', async () => {
+  it('logs and no-ops when an active job has already settled by the time it is cancelled', async () => {
     mockCancelInFlightAttempt.mockReturnValue(false);
     mockJobGetJob.mockResolvedValueOnce({
       getState: vi.fn().mockResolvedValue('active'),
       remove: mockJobRemove,
     });
 
-    await expect(cancelDocumentJob('doc-active-nevershows-123')).resolves.toBeUndefined();
+    await expect(cancelDocumentJob('doc-active-settled-123')).resolves.toBeUndefined();
     expect(mockJobRemove).not.toHaveBeenCalled();
-  }, 10000);
+  });
 });

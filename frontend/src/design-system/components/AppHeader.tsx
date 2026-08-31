@@ -4,7 +4,8 @@
  *   Dark ink.base (#1C1B19) bar, 50px tall. Left: BookOpen icon + "Lumina" wordmark.
  *   Vertical divider. Three tab links — inactive: ink.muted, active: stamp.red + 2px bottom bar.
  *   Mobile (<640px): icon-only with aria-label.
- * @updated 2026-06-23
+ * @author [Author Placeholder]
+ * @created 2026-07-23
  */
 
 import React, { useRef, useCallback } from 'react';
@@ -143,8 +144,9 @@ export function AppHeader(): React.JSX.Element {
           >
             {({ isActive }: { isActive: boolean }) => (
               <>
-                {/* aria-current must live on the element with role="tab" — we use a data attr approach
-                    by adding it via the wrapper. NavLink v6 sets aria-current automatically. */}
+                {/* NavLink itself sets aria-current="page" on this element automatically
+                    when active — no manual wiring needed here. `isActive` (render-prop)
+                    only drives the visual styling below (color, bold, underline bar). */}
                 <span style={{ color: isActive ? '#FF4D2E' : '#8A8578' }}>{tab.icon}</span>
                 {/* Hide label text on mobile (≤768px), show on md+ */}
                 <span className="hidden md:inline">{tab.label}</span>

@@ -15,7 +15,8 @@ import { logger } from '../utils/logger.js';
 const CHECK_TIMEOUT_MS = 3_000;
 
 /** HuggingFace model info endpoint — metadata only, does not invoke inference (no compute cost per poll). */
-const HF_MODEL_INFO_URL = 'https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2';
+const HF_MODEL_INFO_URL =
+  'https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2';
 
 /** Status of a single dependency check. */
 export interface DependencyCheck {
@@ -157,7 +158,10 @@ export async function checkReadiness(): Promise<ReadinessResult> {
     checkGroq(),
   ]);
   const status =
-    supabase.status === 'ok' && redis.status === 'ok' && huggingface.status === 'ok' && groq.status === 'ok'
+    supabase.status === 'ok' &&
+    redis.status === 'ok' &&
+    huggingface.status === 'ok' &&
+    groq.status === 'ok'
       ? 'ok'
       : 'error';
 
@@ -166,4 +170,18 @@ export async function checkReadiness(): Promise<ReadinessResult> {
   }
 
   return { status, checks: { supabase, redis, huggingface, groq } };
+}
+
+/**
+ * Core infrastructure this app cannot run without at all: Supabase backs
+ * every data read/write, Redis backs the BullMQ document-processing queue.
+ * Distinct from HuggingFace/Groq, which are external per-request APIs that
+ * already fail gracefully at call time (a query or upload returns a typed
+ * error to that one caller) — an outage in either at boot is worth a loud
+ * warning, but must not block the whole app from starting.
+ * @param result - A `checkReadiness()` result
+ * @returns True if Supabase and Redis are both reachable
+ */
+export function isCoreInfrastructureReady(result: ReadinessResult): boolean {
+  return result.checks.supabase.status === 'ok' && result.checks.redis.status === 'ok';
 }

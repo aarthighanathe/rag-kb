@@ -21,18 +21,27 @@ import { clientLog } from './utils/clientLogger';
 import { registerTokenGetter } from './services/api';
 
 // Lazy-loaded pages
-const Landing    = React.lazy(() => import('./pages/Landing').then((m) => ({ default: m.Landing })));
-const Upload     = React.lazy(() => import('./pages/Upload').then((m) => ({ default: m.Upload })));
-const Chat       = React.lazy(() => import('./pages/Chat').then((m) => ({ default: m.Chat })));
-const Documents  = React.lazy(() => import('./pages/Documents').then((m) => ({ default: m.Documents })));
-const DesignSystem = React.lazy(() => import('./pages/DesignSystem').then((m) => ({ default: m.DesignSystemShowcase })));
-const SignInPage = React.lazy(() => import('./pages/SignIn').then((m) => ({ default: m.SignInPage })));
+const Landing = React.lazy(() => import('./pages/Landing').then((m) => ({ default: m.Landing })));
+const Upload = React.lazy(() => import('./pages/Upload').then((m) => ({ default: m.Upload })));
+const Chat = React.lazy(() => import('./pages/Chat').then((m) => ({ default: m.Chat })));
+const Documents = React.lazy(() =>
+  import('./pages/Documents').then((m) => ({ default: m.Documents })),
+);
+const DesignSystem = React.lazy(() =>
+  import('./pages/DesignSystem').then((m) => ({ default: m.DesignSystemShowcase })),
+);
+const SignInPage = React.lazy(() =>
+  import('./pages/SignIn').then((m) => ({ default: m.SignInPage })),
+);
 
 // ---------------------------------------------------------------------------
 // Error boundary
 // ---------------------------------------------------------------------------
 
-interface ErrState { hasError: boolean; error: Error | null }
+interface ErrState {
+  hasError: boolean;
+  error: Error | null;
+}
 
 /**
  * Class-based error boundary — catches render errors and shows a recovery UI.
@@ -51,7 +60,9 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, ErrState
     clientLog('error', '[ErrorBoundary]', error, info.componentStack);
   }
 
-  handleReset = (): void => { this.setState({ hasError: false, error: null }); };
+  handleReset = (): void => {
+    this.setState({ hasError: false, error: null });
+  };
 
   override render(): React.ReactNode {
     if (this.state.hasError) {
@@ -198,9 +209,11 @@ export default function App(): React.JSX.Element {
               <Route
                 path="/design-system"
                 element={
-                  <InteriorShell>
-                    <DesignSystem />
-                  </InteriorShell>
+                  <ProtectedRoute>
+                    <InteriorShell>
+                      <DesignSystem />
+                    </InteriorShell>
+                  </ProtectedRoute>
                 }
               />
             </Routes>

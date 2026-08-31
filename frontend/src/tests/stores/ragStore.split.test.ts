@@ -77,6 +77,7 @@ describe('ragStore — split-screen', () => {
         chunkRef: 'Chunk 1',
         similarity: 0.9,
         excerpt: 'text',
+        citationNumber: 1,
       },
     ];
     useRagStore.setState({ liveChunks: chunks });

@@ -39,6 +39,18 @@ export function isBackendUnreachable(message: string): boolean {
 }
 
 /**
+ * Detects a request aborted by `apiFetch`'s default timeout (or a
+ * caller-supplied AbortSignal) — a `DOMException` named `AbortError`, thrown
+ * with no server response ever received. Checked by name, not message text,
+ * since `AbortSignal.timeout()`'s message varies by browser.
+ * @param err - Caught error value
+ * @returns True if `err` is a timeout/abort DOMException
+ */
+export function isRequestTimeout(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'TimeoutError';
+}
+
+/**
  * Converts a raw error message into text suitable for UI display.
  * Callers are expected to have already established that `message` is safe to
  * show — either it came from a server response, or `isBackendUnreachable`
@@ -69,3 +81,7 @@ export function formatUserFacingError(message: string, code?: string): string {
 
   return trimmed;
 }
+
+/** User-facing message shown when a request is aborted by the client-side timeout. */
+export const REQUEST_TIMEOUT_MESSAGE =
+  'The request took too long and was cancelled. Please try again.';

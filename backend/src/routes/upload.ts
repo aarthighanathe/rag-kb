@@ -9,19 +9,16 @@ import { Router, type Request, type Response, type NextFunction } from 'express'
 import { v4 as uuidv4 } from 'uuid';
 import multer from 'multer';
 import crypto from 'crypto';
+import { ZodError } from 'zod';
 import { validateFile, MIME_TO_FILE_TYPE } from '../utils/fileValidator.js';
 import { createDocument, deleteDocument, findDocumentByHash } from '../services/vectorStore.js';
 import { uploadFile, removeFile } from '../services/storage.js';
 import { addDocumentJob } from '../queues/documentQueue.js';
-import { UploadRequestSchema } from '../schemas/upload.schema.js';
+import { UploadFileSchema } from '../schemas/upload.schema.js';
 import { ValidationError, InternalError, type FileType } from '../types/index.js';
 import { logger } from '../utils/logger.js';
 import { env } from '../config/env.js';
 import { logDocumentUpload } from '../utils/auditLogger.js';
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const ALLOWED_MIME_TYPES = Object.keys(MIME_TO_FILE_TYPE);
 
 // ─── Multer ───────────────────────────────────────────────────────────────────
 
@@ -35,13 +32,13 @@ const upload = multer({
     fileSize: env.MAX_FILE_SIZE_MB * 1024 * 1024,
     files: 5,
   },
-  fileFilter: (_req, file, cb) => {
-    if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new ValidationError(`Unsupported MIME type: ${file.mimetype}`));
-    }
-  },
+  // Always accept at the multer layer — rejecting here via cb(error) would
+  // abort multer's entire multipart parse (abortWithError discards every
+  // already-buffered file), defeating the per-file Promise.allSettled
+  // isolation below. The real MIME/size check happens per-file next to
+  // validateFile's magic-byte check, so one bad file can't take down the
+  // others in the same batch.
+  fileFilter: (_req, _file, cb) => cb(null, true),
 });
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -224,20 +221,25 @@ router.post(
       return;
     }
 
-    // Validate the files array shape with Zod (MIME, size, count)
-    const parseResult = UploadRequestSchema.safeParse({ files });
-    if (!parseResult.success) {
-      next(parseResult.error);
+    // File count is a whole-request constraint (also capped by multer's
+    // `files: 5` limit), so it's fine to reject the entire request for it.
+    if (files.length > 5) {
+      next(new ValidationError('At most 5 files may be uploaded per request'));
       return;
     }
 
     const userId = req.auth!.userId;
 
-    // Each file is processed independently — one file's validation/storage
-    // failure must not discard the response for files that already
-    // succeeded (and already have side effects: disk write, DB row, queue job).
+    // Each file is validated (MIME/size via Zod, then magic bytes) and
+    // processed independently — one file's validation/storage failure must
+    // not discard the response for files that already succeeded (and already
+    // have side effects: disk write, DB row, queue job).
     const settled = await Promise.allSettled(
-      files.map((file) => processUploadedFile(file, req.correlationId, userId)),
+      files.map((file) => {
+        const parseResult = UploadFileSchema.safeParse(file);
+        if (!parseResult.success) return Promise.reject(parseResult.error);
+        return processUploadedFile(file, req.correlationId, userId);
+      }),
     );
 
     const documents = settled
@@ -255,7 +257,12 @@ router.post(
       )
       .map(({ result, file }) => ({
         filename: file?.originalname ?? 'unknown',
-        message: result.reason instanceof Error ? result.reason.message : 'Upload failed',
+        message:
+          result.reason instanceof ZodError
+            ? result.reason.issues.map((issue) => issue.message).join('; ')
+            : result.reason instanceof Error
+              ? result.reason.message
+              : 'Upload failed',
       }));
 
     requestLogger.info('Upload batch processed', {

@@ -524,6 +524,61 @@ export const swaggerSpec = {
       },
     },
 
+    // ── Documents — Chunk Preview ─────────────────────────────────────────────
+    '/api/documents/{id}/chunks': {
+      get: {
+        tags: ['Documents'],
+        summary: "Preview a document's chunks",
+        operationId: 'getDocumentChunkPreviews',
+        description: [
+          'Returns a preview (truncated content, up to 3 chunks ordered by chunk_index)',
+          "of a document's chunks, for the Documents page's expanded-row chunk preview.",
+          'Not a full-document dump — use this to spot-check chunking quality, not to',
+          'retrieve complete chunk text.',
+        ].join(' '),
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            description: 'Document UUID',
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Chunk previews',
+            headers: { ...correlationIdHeader },
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/DocumentChunkPreviewsResponse' },
+                example: {
+                  success: true,
+                  data: {
+                    chunks: [
+                      {
+                        id: '660e8400-e29b-41d4-a716-446655440010',
+                        chunkIndex: 0,
+                        contentPreview:
+                          'This document covers the onboarding process for new team members…',
+                        truncated: true,
+                        tokenCount: 118,
+                      },
+                    ],
+                  },
+                  meta: { correlationId: '550e8400-e29b-41d4-a716-446655440000' },
+                },
+              },
+            },
+          },
+          '400': { $ref: '#/components/responses/BadRequest' },
+          '404': { $ref: '#/components/responses/NotFound' },
+          '429': { $ref: '#/components/responses/RateLimited' },
+          '500': { $ref: '#/components/responses/InternalServerError' },
+        },
+      },
+    },
+
     // ── Documents — Tags ───────────────────────────────────────────────────────
     '/api/documents/{id}/tags': {
       patch: {
@@ -1363,6 +1418,40 @@ export const swaggerSpec = {
             properties: {
               documentId: { type: 'string', format: 'uuid' },
               message: { type: 'string', example: 'Document deleted successfully.' },
+            },
+          },
+          meta: {
+            type: 'object',
+            properties: {
+              correlationId: { type: 'string', format: 'uuid' },
+            },
+          },
+        },
+      },
+
+      DocumentChunkPreviewsResponse: {
+        type: 'object',
+        required: ['success', 'data'],
+        properties: {
+          success: { type: 'boolean', enum: [true] },
+          data: {
+            type: 'object',
+            required: ['chunks'],
+            properties: {
+              chunks: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  required: ['id', 'chunkIndex', 'contentPreview', 'truncated', 'tokenCount'],
+                  properties: {
+                    id: { type: 'string', format: 'uuid' },
+                    chunkIndex: { type: 'integer', minimum: 0 },
+                    contentPreview: { type: 'string' },
+                    truncated: { type: 'boolean' },
+                    tokenCount: { type: 'integer', nullable: true },
+                  },
+                },
+              },
             },
           },
           meta: {

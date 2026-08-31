@@ -2,6 +2,7 @@
  * @file SignIn.tsx
  * @description Clerk-powered sign-in page with Google OAuth only.
  *   Styled to match the Ink-and-Paper design system used by Landing.tsx.
+ * @author [Author Placeholder]
  * @created 2026-07-05
  */
 

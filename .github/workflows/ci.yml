@@ -33,6 +33,25 @@ jobs:
       - run: npm run lint:check
         working-directory: backend
 
+  # ── Backend: dependency audit ───────────────────────────────────────────
+  # Fails the build on any high/critical-severity vulnerability in the
+  # dependency tree. Paired with .github/dependabot.yml, which opens weekly
+  # PRs to keep dependencies patched before this ever needs to fail.
+  backend-audit:
+    name: Backend / Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - run: npm audit --audit-level=high
+        working-directory: backend
+
   # ── Backend: type-check ────────────────────────────────────────────────
   backend-typecheck:
     name: Backend / Type-check
@@ -140,6 +159,25 @@ jobs:
       - run: npm run lint:check
         working-directory: frontend
 
+  # ── Frontend: dependency audit ──────────────────────────────────────────
+  # Fails the build on any high/critical-severity vulnerability in the
+  # dependency tree. Paired with .github/dependabot.yml, which opens weekly
+  # PRs to keep dependencies patched before this ever needs to fail.
+  frontend-audit:
+    name: Frontend / Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm audit --audit-level=high
+        working-directory: frontend
+
   # ── Frontend: type-check ────────────────────────────────────────────────
   frontend-typecheck:
     name: Frontend / Type-check
@@ -190,3 +228,113 @@ jobs:
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
+
+  # ── E2E: Playwright ─────────────────────────────────────────────────────
+  # frontend/playwright/e2e/*.spec.ts drive the real app through the Vite
+  # dev server (webServer in playwright.config.ts), which proxies /api to a
+  # real backend on :3000 (see vite.config.ts) — so unlike the mocked
+  # backend-test-integration job above, this needs an actual backend process
+  # plus Redis (BullMQ) up and reachable, and auth.spec.ts additionally
+  # signs in a disposable Clerk test-instance user via @clerk/testing
+  # (playwright/global-setup.ts calls clerkSetup(), which needs a real
+  # CLERK_SECRET_KEY for a *test* Clerk instance — @clerk/testing is already
+  # a frontend devDependency for exactly this).
+  #
+  # continue-on-error: true — this repo does not yet have the required
+  # secrets configured in CI (GROQ_API_KEY, HUGGINGFACE_TOKEN, SUPABASE_URL,
+  # SUPABASE_SERVICE_KEY, CLERK_SECRET_KEY, CLERK_PUBLISHABLE_KEY,
+  # E2E_CLERK_USER_EMAIL, E2E_CLERK_USER_PASSWORD — see backend/.env.example
+  # and frontend/.env.example for what each is). backend/src/config/env.ts
+  # fails fast at boot without real values for the first six, so the job
+  # cannot even start the backend today. Once a dedicated Clerk *test*
+  # instance and a Supabase project usable from CI are provisioned and their
+  # values added as repo/environment secrets, remove continue-on-error so
+  # this becomes a hard merge gate like the jobs above it.
+  e2e:
+    name: E2E / Playwright
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      PORT: 3000
+      NODE_ENV: test
+      CORS_ORIGIN: http://localhost:5173
+      REDIS_URL: redis://127.0.0.1:6379
+      MAX_FILE_SIZE_MB: 10
+      RATE_LIMIT_WINDOW_MS: 60000
+      RATE_LIMIT_MAX_UPLOAD: 5
+      RATE_LIMIT_MAX_QUERY: 30
+      RATE_LIMIT_MAX_DOCUMENTS: 100
+      LOG_LEVEL: info
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      ADMIN_SECRET: ${{ secrets.E2E_ADMIN_SECRET }}
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+      CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+      VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+      E2E_CLERK_USER_EMAIL: ${{ secrets.E2E_CLERK_USER_EMAIL }}
+      E2E_CLERK_USER_PASSWORD: ${{ secrets.E2E_CLERK_USER_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend deps
+        run: npm ci
+        working-directory: backend
+      - name: Build backend
+        run: npm run build
+        working-directory: backend
+      - name: Start backend
+        run: nohup node dist/index.js > backend.log 2>&1 &
+        working-directory: backend
+      - name: Wait for backend readiness
+        run: npx wait-on http://localhost:3000/api/health --timeout 60000
+        working-directory: backend
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: frontend
+      # playwright.config.ts only lists chromium + firefox projects — webkit
+      # isn't configured, so it's skipped here too.
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox
+        working-directory: frontend
+      - name: Run Playwright E2E suite
+        run: npm run test:e2e
+        working-directory: frontend
+        env:
+          CI: true
+
+      - name: Upload backend log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-log
+          path: backend/backend.log
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7

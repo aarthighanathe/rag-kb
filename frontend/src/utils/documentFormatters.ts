@@ -74,12 +74,21 @@ export function fmtDateTime(iso: string): string {
 }
 
 /**
- * Returns true if any other document in the list shares this document's filename —
- * used to show a disambiguating detail (upload time, short ID) wherever duplicates exist.
- * @param doc - Document to check
- * @param all - Full list of documents to check against
- * @returns True if another document in the list shares this filename
+ * Computes the set of document IDs whose filename is shared by at least one
+ * other document in the list — a single O(n) pass, for callers that need the
+ * collision check for every document in a list (e.g. rendering a grid/table).
+ * @param all - Full list of documents to check
+ * @returns Set of document IDs that collide with another document's filename
  */
-export function hasFilenameCollision(doc: DocumentRecord, all: DocumentRecord[]): boolean {
-  return all.some((other) => other.id !== doc.id && other.filename === doc.filename);
+export function getDuplicateFilenameIds(all: DocumentRecord[]): Set<string> {
+  const countByFilename = new Map<string, number>();
+  for (const doc of all) {
+    countByFilename.set(doc.filename, (countByFilename.get(doc.filename) ?? 0) + 1);
+  }
+
+  const duplicateIds = new Set<string>();
+  for (const doc of all) {
+    if ((countByFilename.get(doc.filename) ?? 0) > 1) duplicateIds.add(doc.id);
+  }
+  return duplicateIds;
 }

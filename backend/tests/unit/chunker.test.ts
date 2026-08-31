@@ -486,6 +486,28 @@ describe('createChunks', () => {
       expect(firstChunk).not.toBe(secondChunk);
     });
 
+    it('detects a long, mixed-case numbered heading as a section boundary', () => {
+      // Long enough to exceed the old 78-char cap, and mixed-case (not every
+      // word capitalized) so it would also fail BARE_TITLE_REGEX's fallback.
+      const longHeading =
+        '1. A comprehensive guide to configuring the advanced retrieval pipeline for enterprise deployments';
+      const text = [
+        longHeading,
+        'This section explains how to begin using the product.',
+        '2. Advanced Usage',
+        'This section covers advanced configuration options.',
+      ].join('\n\n');
+
+      const chunks = createChunks(text, { chunkSize: 512, chunkOverlap: 10, separator: ['\n\n', '\n', ' '] });
+
+      const firstChunk = chunks.find((c) => c.content.includes('begin using'));
+      const secondChunk = chunks.find((c) => c.content.includes('advanced configuration'));
+      expect(firstChunk).toBeDefined();
+      expect(secondChunk).toBeDefined();
+      expect(firstChunk).not.toBe(secondChunk);
+      expect(firstChunk?.metadata.section).toContain('comprehensive guide');
+    });
+
     it('does not misdetect an ordinary declarative sentence as a heading', () => {
       // Short, capitalized, no trailing punctuation on its own line-ish
       // content — but this one is a real sentence with mid-line punctuation,

@@ -14,6 +14,7 @@ import {
   FileDropzone,
   CitationChip,
   ChatMessage,
+  AssistantMessage,
   IndexCard,
   StreamingCursor,
   LoadingSpinner,
@@ -22,10 +23,7 @@ import {
   ToastContainer,
   useToast,
 } from '../design-system';
-import {
-  Upload, Search,
-  AlertCircle, FileText, Trash2,
-} from 'lucide-react';
+import { Upload, Search, AlertCircle, FileText, Trash2 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
 // Section wrapper
@@ -47,7 +45,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mb-ds-6">
-      <p className="text-ds-xs font-body text-ds-text-muted tracking-ds-wider uppercase mb-ds-3">{label}</p>
+      <p className="text-ds-xs font-body text-ds-text-muted tracking-ds-wider uppercase mb-ds-3">
+        {label}
+      </p>
       <div className="flex flex-wrap items-center gap-ds-3">{children}</div>
     </div>
   );
@@ -64,13 +64,19 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 export function DesignSystemShowcase(): React.JSX.Element {
   const { toasts, toast, dismiss } = useToast();
   const [inputValue, setInputValue] = useState('');
-  const [modalOpen, setModalOpen]   = useState(false);
-  const [streaming, setStreaming]   = useState(true);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [streaming, setStreaming] = useState(true);
 
   const [mockFiles] = useState([
     { id: '1', name: 'research-paper.pdf', progress: 72, status: 'uploading' as const },
-    { id: '2', name: 'notes.txt',          progress: 100, status: 'done' as const },
-    { id: '3', name: 'broken.docx',        progress: 0,   status: 'error' as const, error: 'File exceeds 10 MB limit' },
+    { id: '2', name: 'notes.txt', progress: 100, status: 'done' as const },
+    {
+      id: '3',
+      name: 'broken.docx',
+      progress: 0,
+      status: 'error' as const,
+      error: 'File exceeds 10 MB limit',
+    },
   ]);
 
   return (
@@ -86,7 +92,8 @@ export function DesignSystemShowcase(): React.JSX.Element {
           Lab Notebook
         </h1>
         <p className="text-ds-base font-body text-ds-text-secondary mt-ds-3 leading-ds-relaxed">
-          Design system showcase — every component in all variants. Use for visual QA before shipping.
+          Design system showcase — every component in all variants. Use for visual QA before
+          shipping.
         </p>
       </header>
 
@@ -94,14 +101,14 @@ export function DesignSystemShowcase(): React.JSX.Element {
       <Section title="Color Tokens">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-ds-3">
           {[
-            ['Paper',     'bg-ds-base',      '#F7F5F0'],
-            ['Surface',   'bg-ds-surface',   '#FFFFFF'],
-            ['Card',      'bg-ds-elevated',  '#FCFBF8'],
-            ['Hairline',  'bg-ds-hairline',  '#D8D4C8'],
-            ['Stamp',     'bg-ds-stamp',     '#FF4D2E'],
-            ['Archive',   'bg-ds-archive',   '#2D5A4A'],
+            ['Paper', 'bg-ds-base', '#F7F5F0'],
+            ['Surface', 'bg-ds-surface', '#FFFFFF'],
+            ['Card', 'bg-ds-elevated', '#FCFBF8'],
+            ['Hairline', 'bg-ds-hairline', '#D8D4C8'],
+            ['Stamp', 'bg-ds-stamp', '#FF4D2E'],
+            ['Archive', 'bg-ds-archive', '#2D5A4A'],
             ['Highlight', 'bg-ds-highlight', '#FFE066'],
-            ['Error',     'bg-ds-error',     '#C0392B'],
+            ['Error', 'bg-ds-error', '#C0392B'],
           ].map(([name, cls, hex]) => (
             <div key={name} className="flex flex-col gap-ds-2">
               <div className={`h-12 rounded-[2px] border border-ds-hairline ${cls}`} />
@@ -117,8 +124,10 @@ export function DesignSystemShowcase(): React.JSX.Element {
       {/* ── TYPOGRAPHY ─────────────────────────────────────────────────────── */}
       <Section title="Typography">
         <div className="mb-ds-4">
-          <p className="text-ds-xs font-body text-ds-text-muted uppercase tracking-ds-wider mb-ds-2">Fraunces (Display)</p>
-          {(['3xl','2xl','xl','lg','base'] as const).map((size) => (
+          <p className="text-ds-xs font-body text-ds-text-muted uppercase tracking-ds-wider mb-ds-2">
+            Fraunces (Display)
+          </p>
+          {(['3xl', '2xl', 'xl', 'lg', 'base'] as const).map((size) => (
             <p
               key={size}
               className={`text-ds-${size} font-display font-black text-ds-text-primary leading-ds-tight mb-ds-2`}
@@ -130,14 +139,19 @@ export function DesignSystemShowcase(): React.JSX.Element {
         </div>
         <div className="h-px bg-ds-hairline my-ds-4" aria-hidden="true" />
         <div className="mb-ds-4">
-          <p className="text-ds-xs font-body text-ds-text-muted uppercase tracking-ds-wider mb-ds-2">Space Grotesk (Body/UI)</p>
+          <p className="text-ds-xs font-body text-ds-text-muted uppercase tracking-ds-wider mb-ds-2">
+            Space Grotesk (Body/UI)
+          </p>
           <p className="text-ds-base font-body text-ds-text-secondary leading-ds-relaxed">
-            Reading long-form research output comfortably at body size. Space Grotesk balances legibility with personality.
+            Reading long-form research output comfortably at body size. Space Grotesk balances
+            legibility with personality.
           </p>
         </div>
         <div className="h-px bg-ds-hairline my-ds-4" aria-hidden="true" />
         <div>
-          <p className="text-ds-xs font-body text-ds-text-muted uppercase tracking-ds-wider mb-ds-2">Space Mono (Data/Code)</p>
+          <p className="text-ds-xs font-body text-ds-text-muted uppercase tracking-ds-wider mb-ds-2">
+            Space Mono (Data/Code)
+          </p>
           <p className="text-ds-sm font-mono text-ds-archive">
             0x1A2B3C4D · chunk.id=42 · similarity=0.94 · tokens=384
           </p>
@@ -159,7 +173,9 @@ export function DesignSystemShowcase(): React.JSX.Element {
         </Row>
         <Row label="With Icons">
           <Button iconLeft={<Upload size={15} />}>Upload</Button>
-          <Button variant="secondary" iconRight={<Search size={15} />}>Search</Button>
+          <Button variant="secondary" iconRight={<Search size={15} />}>
+            Search
+          </Button>
           <Button variant="ghost" iconOnly iconLeft={<Trash2 size={15} />} aria-label="Delete" />
         </Row>
         <Row label="States">
@@ -215,24 +231,39 @@ export function DesignSystemShowcase(): React.JSX.Element {
           <Badge variant="citation">Source</Badge>
         </Row>
         <Row label="With dot indicator">
-          <Badge variant="success" dot>Ready</Badge>
-          <Badge variant="warning" dot>Processing</Badge>
-          <Badge variant="danger"  dot>Failed</Badge>
+          <Badge variant="success" dot>
+            Ready
+          </Badge>
+          <Badge variant="warning" dot>
+            Processing
+          </Badge>
+          <Badge variant="danger" dot>
+            Failed
+          </Badge>
         </Row>
         <Row label="Small size">
-          <Badge size="sm" variant="default">PDF</Badge>
-          <Badge size="sm" variant="success">Ready</Badge>
-          <Badge size="sm" variant="citation" dot>Cited</Badge>
+          <Badge size="sm" variant="default">
+            PDF
+          </Badge>
+          <Badge size="sm" variant="success">
+            Ready
+          </Badge>
+          <Badge size="sm" variant="citation" dot>
+            Cited
+          </Badge>
         </Row>
       </Section>
 
       {/* ── INDEX CARD (Signature component) ───────────────────────────────── */}
       <Section title="IndexCard (Signature Element)">
         <p className="text-ds-xs font-body text-ds-text-muted mb-ds-4">
-          Click or press Enter/Space to flip. Each card has a deterministic rotation seeded by document name + index.
-          The first card (index 0) shows a paperclip.
+          Click or press Enter/Space to flip. Each card has a deterministic rotation seeded by
+          document name + index. The first card (index 0) shows a paperclip.
         </p>
-        <div className="grid gap-6" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
+        <div
+          className="grid gap-6"
+          style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}
+        >
           <IndexCard
             documentName="attention-is-all-you-need.pdf"
             chunkText="We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely."
@@ -277,7 +308,8 @@ export function DesignSystemShowcase(): React.JSX.Element {
       <Section title="StreamingCursor">
         <Row label="Active">
           <p className="font-body text-ds-base text-ds-text-primary">
-            Composing answer<StreamingCursor />
+            Composing answer
+            <StreamingCursor />
           </p>
         </Row>
         <Row label="Controls">
@@ -285,7 +317,8 @@ export function DesignSystemShowcase(): React.JSX.Element {
             {streaming ? 'Stop streaming' : 'Start streaming'}
           </Button>
           <p className="font-body text-ds-base text-ds-text-primary">
-            The answer is 42<StreamingCursor active={streaming} />
+            The answer is 42
+            <StreamingCursor active={streaming} />
           </p>
         </Row>
       </Section>
@@ -303,12 +336,21 @@ export function DesignSystemShowcase(): React.JSX.Element {
             fullText="This is the full chunk text that will be shown in the side panel when the user clicks the citation."
             index={0}
           />
-          <CitationChip documentName="notes.txt" chunkRef="§3" relevanceScore={0.61} fullText="Medium relevance chunk content." index={1} />
+          <CitationChip
+            documentName="notes.txt"
+            chunkRef="§3"
+            relevanceScore={0.61}
+            fullText="Medium relevance chunk content."
+            index={1}
+          />
           <CitationChip documentName="old-docs.md" chunkRef="p.2" relevanceScore={0.27} index={2} />
         </Row>
       </Section>
 
       {/* ── CHAT MESSAGE ────────────────────────────────────────────────────── */}
+      {/* User bubble uses ChatMessage; assistant replies use AssistantMessage
+          directly (the same component Chat.tsx renders in production) rather
+          than duplicating its citation/copy/streaming behavior here. */}
       <Section title="ChatMessage">
         <div className="flex flex-col gap-ds-6 max-w-2xl">
           <ChatMessage
@@ -316,19 +358,31 @@ export function DesignSystemShowcase(): React.JSX.Element {
             content="What does the paper say about transformer attention mechanisms?"
             timestamp={new Date().toISOString()}
           />
-          <ChatMessage
-            role="assistant"
+          <AssistantMessage
             content="Transformer attention mechanisms use scaled dot-product attention where queries, keys, and values are projected from the input. The scaling factor 1/√dk prevents vanishing gradients."
             citations={[
-              { id: 'c1', documentName: 'attention-paper.pdf', chunkRef: 'p.4', relevanceScore: 0.96, fullText: 'Scaled dot-product attention: Attention(Q,K,V) = softmax(QKᵀ/√dk)V' },
-              { id: 'c2', documentName: 'survey.pdf', chunkRef: 'p.12', relevanceScore: 0.72 },
+              {
+                id: 'c1',
+                documentName: 'attention-paper.pdf',
+                chunkRef: 'p.4',
+                relevanceScore: 0.96,
+                fullText: 'Scaled dot-product attention: Attention(Q,K,V) = softmax(QKᵀ/√dk)V',
+                citationNumber: 1,
+              },
+              {
+                id: 'c2',
+                documentName: 'survey.pdf',
+                chunkRef: 'p.12',
+                relevanceScore: 0.72,
+                citationNumber: 2,
+              },
             ]}
             timestamp={new Date().toISOString()}
           />
-          <ChatMessage
-            role="assistant"
+          <AssistantMessage
             content="Streaming response in progress…"
-            streaming={true}
+            citations={[]}
+            isStreaming={true}
           />
         </div>
       </Section>
@@ -338,8 +392,12 @@ export function DesignSystemShowcase(): React.JSX.Element {
         <div className="max-w-xl">
           <FileDropzone
             files={mockFiles}
-            onFiles={(_f) => {/* console handled by parent */}}
-            onRemove={(_id) => {/* console handled by parent */}}
+            onFiles={(_f) => {
+              /* console handled by parent */
+            }}
+            onRemove={(_id) => {
+              /* console handled by parent */
+            }}
             maxSizeBytes={10 * 1024 * 1024}
           />
         </div>
@@ -367,14 +425,19 @@ export function DesignSystemShowcase(): React.JSX.Element {
           subtitle="This action cannot be undone."
           footer={
             <>
-              <Button variant="secondary" onClick={() => setModalOpen(false)}>Cancel</Button>
-              <Button variant="danger"    onClick={() => setModalOpen(false)}>Remove document</Button>
+              <Button variant="secondary" onClick={() => setModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button variant="danger" onClick={() => setModalOpen(false)}>
+                Remove document
+              </Button>
             </>
           }
         >
           <p className="text-ds-base font-body text-ds-text-secondary leading-ds-relaxed">
-            Are you sure you want to remove <strong className="text-ds-text-primary font-medium">research-paper.pdf</strong>?
-            All embeddings and chat history referencing this document will also be removed.
+            Are you sure you want to remove{' '}
+            <strong className="text-ds-text-primary font-medium">research-paper.pdf</strong>? All
+            embeddings and chat history referencing this document will also be removed.
           </p>
         </Modal>
       </Section>
@@ -382,19 +445,50 @@ export function DesignSystemShowcase(): React.JSX.Element {
       {/* ── TOAST ───────────────────────────────────────────────────────────── */}
       <Section title="Toast">
         <Row label="Trigger toasts">
-          <Button variant="secondary" size="sm" onClick={() => toast('Document filed successfully', { variant: 'success', description: 'Processing will begin shortly.' })}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() =>
+              toast('Document filed successfully', {
+                variant: 'success',
+                description: 'Processing will begin shortly.',
+              })
+            }
+          >
             Success
           </Button>
-          <Button variant="secondary" size="sm" onClick={() => toast('Upload failed — file too large', { variant: 'error' })}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => toast('Upload failed — file too large', { variant: 'error' })}
+          >
             Error
           </Button>
-          <Button variant="secondary" size="sm" onClick={() => toast('Queue is experiencing high load', { variant: 'warning' })}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => toast('Queue is experiencing high load', { variant: 'warning' })}
+          >
             Warning
           </Button>
-          <Button variant="secondary" size="sm" onClick={() => toast('Embedding model updated to v2', { variant: 'info' })}>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => toast('Embedding model updated to v2', { variant: 'info' })}
+          >
             Info
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => toast('Persistent toast', { duration: 0, variant: 'info', description: 'This will not auto-dismiss.' })}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() =>
+              toast('Persistent toast', {
+                duration: 0,
+                variant: 'info',
+                description: 'This will not auto-dismiss.',
+              })
+            }
+          >
             Persistent
           </Button>
         </Row>
@@ -404,12 +498,15 @@ export function DesignSystemShowcase(): React.JSX.Element {
       <Section title="Shadows">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-ds-4">
           {[
-            { label: 'ds-sm',      cls: 'shadow-ds-sm'      },
-            { label: 'ds-md',      cls: 'shadow-ds-md'      },
-            { label: 'ds-lifted',  cls: 'shadow-ds-lifted'  },
-            { label: 'ds-stamp',   cls: 'shadow-ds-stamp'   },
+            { label: 'ds-sm', cls: 'shadow-ds-sm' },
+            { label: 'ds-md', cls: 'shadow-ds-md' },
+            { label: 'ds-lifted', cls: 'shadow-ds-lifted' },
+            { label: 'ds-stamp', cls: 'shadow-ds-stamp' },
           ].map(({ label, cls }) => (
-            <div key={label} className={`h-14 rounded-[2px] bg-ds-card border border-ds-hairline ${cls} flex items-center justify-center`}>
+            <div
+              key={label}
+              className={`h-14 rounded-[2px] bg-ds-card border border-ds-hairline ${cls} flex items-center justify-center`}
+            >
               <p className="text-ds-xs font-mono text-ds-text-muted">{label}</p>
             </div>
           ))}

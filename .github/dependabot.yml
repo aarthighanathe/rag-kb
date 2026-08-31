@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # ── Backend (npm) ──────────────────────────────────────────────────────
+  - package-ecosystem: 'npm'
+    directory: '/backend'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 10
+
+  # ── Frontend (npm) ─────────────────────────────────────────────────────
+  - package-ecosystem: 'npm'
+    directory: '/frontend'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 10
+
+  # ── GitHub Actions (the CI workflow itself) ────────────────────────────
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+    open-pull-requests-limit: 10

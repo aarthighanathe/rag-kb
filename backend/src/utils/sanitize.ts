@@ -36,7 +36,12 @@ const MAX_QUERY_LENGTH = 2_000;
  * (if ever interpolated), or excessively long strings that inflate billing / DoS the LLM.
  *
  * @param text - Raw query text from the user
- * @param maxLength - Maximum allowed length (default: 2000)
+ * @param maxLength - Maximum allowed length (default: 2000). The one current
+ *   call site (routes/query.ts) never overrides this — QueryRequestSchema's
+ *   Zod validation already caps `query` at 1000 chars before this function
+ *   ever sees it, so the truncation branch is unreachable there in practice.
+ *   The parameter is kept general-purpose (and directly unit-tested) for any
+ *   future caller with a different length ceiling.
  * @returns Sanitized, whitespace-normalized, truncated string
  */
 export function sanitizeQueryText(text: string, maxLength: number = MAX_QUERY_LENGTH): string {

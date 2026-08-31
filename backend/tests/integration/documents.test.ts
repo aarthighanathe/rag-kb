@@ -22,6 +22,7 @@ vi.mock('@services/vectorStore', () => ({
   hybridSearch: vi.fn(),
   computeDocumentSimilarity: vi.fn(),
   getChunkQualityStats: vi.fn(),
+  getDocumentChunkPreviews: vi.fn(),
   insertAuditLog: vi.fn().mockResolvedValue(undefined),
   getSuggestedTopics: vi.fn(),
   setDocumentTags: vi.fn(),
@@ -174,6 +175,57 @@ describe('GET /api/documents/:id', () => {
 
     expect(res.body.success).toBe(false);
     expect(res.body.error.code).toBe('NOT_FOUND');
+  });
+});
+
+// ── GET /api/documents/:id/chunks ────────────────────────────────────────────
+
+describe('GET /api/documents/:id/chunks', () => {
+  it('returns 200 with chunk previews in the data field', async () => {
+    const { getDocumentChunkPreviews } = await import('@services/vectorStore') as unknown as {
+      getDocumentChunkPreviews: ReturnType<typeof vi.fn>;
+    };
+    getDocumentChunkPreviews.mockResolvedValue([
+      { id: 'chunk-1', chunkIndex: 0, contentPreview: 'Hello world', truncated: false, tokenCount: 5 },
+    ]);
+
+    const res = await authedRequest(app)
+      .get(`/api/documents/${MOCK_DOCUMENT.id}/chunks`)
+      .expect(200);
+
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.chunks).toEqual([
+      { id: 'chunk-1', chunkIndex: 0, contentPreview: 'Hello world', truncated: false, tokenCount: 5 },
+    ]);
+    expect(getDocumentChunkPreviews).toHaveBeenCalledWith(MOCK_DOCUMENT.id, TEST_USER_ID);
+  });
+
+  it('returns 422 for a non-UUID id path parameter', async () => {
+    const res = await authedRequest(app)
+      .get('/api/documents/not-a-valid-uuid/chunks')
+      .expect(422);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('UNPROCESSABLE_ENTITY');
+  });
+
+  it('returns 404 when the document does not exist or is owned by another user', async () => {
+    const { getDocumentChunkPreviews } = await import('@services/vectorStore') as unknown as {
+      getDocumentChunkPreviews: ReturnType<typeof vi.fn>;
+    };
+    const { NotFoundError } = await import('../../src/types/index.js');
+    getDocumentChunkPreviews.mockRejectedValue(new NotFoundError('Document not found'));
+
+    const res = await authedRequest(app)
+      .get('/api/documents/550e8400-e29b-41d4-a716-000000000099/chunks')
+      .expect(404);
+
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('NOT_FOUND');
+  });
+
+  it('returns 401 without an Authorization header', async () => {
+    await supertest(app).get(`/api/documents/${MOCK_DOCUMENT.id}/chunks`).expect(401);
   });
 });
 

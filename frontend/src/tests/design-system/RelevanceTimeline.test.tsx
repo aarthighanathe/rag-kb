@@ -17,6 +17,7 @@ const mockCitations: ChatCitation[] = [
     chunkRef: 'Chunk 1',
     relevanceScore: 0.94,
     fullText: 'Full text 1',
+    citationNumber: 1,
   },
   {
     id: 'c2',
@@ -24,6 +25,7 @@ const mockCitations: ChatCitation[] = [
     chunkRef: 'Chunk 2',
     relevanceScore: 0.87,
     fullText: 'Full text 2',
+    citationNumber: 2,
   },
   {
     id: 'c3',
@@ -31,14 +33,13 @@ const mockCitations: ChatCitation[] = [
     chunkRef: 'Chunk 3',
     relevanceScore: 0.45,
     fullText: 'Full text 3',
+    citationNumber: 3,
   },
 ];
 
 describe('RelevanceTimeline', () => {
   it('renders nothing when citations are empty', () => {
-    const { container } = render(
-      <RelevanceTimeline citations={[]} />,
-    );
+    const { container } = render(<RelevanceTimeline citations={[]} />);
     expect(container.firstChild).toBeNull();
   });
 

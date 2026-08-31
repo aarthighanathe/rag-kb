@@ -118,6 +118,15 @@ export interface SourceCitation {
   chunkId: string;
   similarity: number;
   excerpt: string;
+  /**
+   * 1-based position of this chunk in the original retrieval order — the same
+   * number the model was shown as `[N]` in the prompt (see buildContextString).
+   * Preserved through filterCitationsByModelOutput so the frontend can match a
+   * `[N]` marker back to its citation even after out-of-range/uncited entries
+   * are dropped and the array is no longer index-aligned with the model's
+   * numbering.
+   */
+  citationNumber: number;
 }
 
 /** BullMQ job data payload for document processing. */

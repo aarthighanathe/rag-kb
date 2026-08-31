@@ -40,7 +40,14 @@ const REQUEST_TIMEOUT_MS = 30_000;
 export interface EmbeddingResult {
   /** 384-dimensional embedding vector. */
   embedding: number[];
-  /** Estimated token count for the input text (1 token ≈ 4 chars). */
+  /**
+   * Estimated token count for the input text, via the cheap chars/4
+   * heuristic in {@link estimateTokens} — NOT the same estimation method as
+   * chunker.ts's `estimateTokenCount` (real BPE tokenization via
+   * gpt-tokenizer, used for the persisted chunk `token_count` column).
+   * This field is analytics-only; do not compare it against chunk token
+   * counts expecting them to agree.
+   */
   tokenCount: number;
   /** Model identifier used to produce this embedding. */
   model: string;
@@ -71,7 +78,11 @@ function splitIntoBatches<T>(arr: T[], size: number): T[][] {
 }
 
 /**
- * Rough token count estimate (1 token ≈ 4 chars).
+ * Rough token count estimate (1 token ≈ 4 chars) — an O(1) heuristic
+ * deliberately used only for the analytics-only {@link EmbeddingResult.tokenCount}
+ * field, not for anything that affects chunking or storage decisions. See
+ * chunker.ts's `estimateTokenCount` for the real BPE-based tokenizer used
+ * wherever token counts drive actual behavior (chunk sizing, overlap).
  * @param text - Input string
  * @returns Non-negative estimated token count
  */
@@ -218,6 +229,39 @@ export async function embedText(text: string): Promise<EmbeddingResult> {
  * @throws {EmbeddingError} On API failure, invalid dimension, or empty input after filtering
  * @throws {JobCancelledError} If `signal` is aborted before a batch starts
  */
+/**
+ * Validates every embedding in a batch's raw response and zips each with its
+ * source text into an EmbeddingResult.
+ * @param rawEmbeddings - Raw vectors returned by the HuggingFace API for one batch
+ * @param batch - The source texts sent for this batch, same order as rawEmbeddings
+ * @param batchIdx - Index of this batch, used only for error messages
+ * @returns EmbeddingResults in the same order as rawEmbeddings
+ * @throws {EmbeddingError} If any embedding fails dimension/finiteness validation
+ */
+function buildBatchResults(
+  rawEmbeddings: number[][],
+  batch: string[],
+  batchIdx: number,
+): EmbeddingResult[] {
+  const batchResults: EmbeddingResult[] = [];
+  for (const [i, embedding] of rawEmbeddings.entries()) {
+    if (!validateEmbedding(embedding)) {
+      throw new EmbeddingError(
+        `Invalid embedding dimension at batch ${batchIdx} index ${i}: expected ${EMBEDDING_DIMENSION}, got ${embedding.length}`,
+        EmbeddingErrorCode.INVALID_DIMENSION,
+        500,
+      );
+    }
+
+    batchResults.push({
+      embedding,
+      tokenCount: estimateTokens(batch[i] ?? ''),
+      model: EMBEDDING_MODEL,
+    });
+  }
+  return batchResults;
+}
+
 export async function embedBatch(
   texts: string[],
   batchSize: number = MAX_BATCH_SIZE,
@@ -256,21 +300,15 @@ export async function embedBatch(
 
     logger.debug('Batch embedded', { batchIdx, batchSize: batch.length, latencyMs });
 
-    for (const [i, embedding] of rawEmbeddings.entries()) {
-      if (!validateEmbedding(embedding)) {
-        throw new EmbeddingError(
-          `Invalid embedding dimension at batch ${batchIdx} index ${i}: expected ${EMBEDDING_DIMENSION}, got ${embedding.length}`,
-          EmbeddingErrorCode.INVALID_DIMENSION,
-          500,
-        );
-      }
-
-      results.push({
-        embedding,
-        tokenCount: estimateTokens(batch[i] ?? ''),
-        model: EMBEDDING_MODEL,
-      });
+    if (rawEmbeddings.length !== batch.length) {
+      throw new EmbeddingError(
+        `Embedding count mismatch at batch ${batchIdx}: sent ${batch.length} texts, received ${rawEmbeddings.length} embeddings`,
+        EmbeddingErrorCode.COUNT_MISMATCH,
+        502,
+      );
     }
+
+    results.push(...buildBatchResults(rawEmbeddings, batch, batchIdx));
   }
 
   return results;

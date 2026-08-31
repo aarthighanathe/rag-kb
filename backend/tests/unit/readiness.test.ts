@@ -36,7 +36,7 @@ vi.mock('../../src/utils/logger', () => ({
   logger: { debug: vi.fn(), warn: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
-import { checkReadiness } from '../../src/utils/readiness';
+import { checkReadiness, isCoreInfrastructureReady } from '../../src/utils/readiness';
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
 
@@ -117,5 +117,44 @@ describe('checkReadiness', () => {
     expect(result.checks.redis.status).toBe('error');
     expect(result.checks.huggingface.status).toBe('ok');
     expect(result.checks.groq.status).toBe('ok');
+  });
+});
+
+describe('isCoreInfrastructureReady', () => {
+  it('returns true when Supabase and Redis are both ok, regardless of HuggingFace/Groq', async () => {
+    mockFetch.mockRejectedValue(new Error('HuggingFace down'));
+    mockModelsList.mockRejectedValue(new Error('Groq down'));
+
+    const result = await checkReadiness();
+
+    expect(result.status).toBe('error');
+    expect(isCoreInfrastructureReady(result)).toBe(true);
+  });
+
+  it('returns false when Supabase is down, even if everything else is ok', async () => {
+    const chain = {
+      select: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue({ error: { message: 'connection refused' } }),
+    };
+    mockFrom.mockReturnValue(chain);
+
+    const result = await checkReadiness();
+
+    expect(isCoreInfrastructureReady(result)).toBe(false);
+  });
+
+  it('returns false when Redis is down, even if everything else is ok', async () => {
+    mockRedisInfo.mockRejectedValue(new Error('NOAUTH Authentication required'));
+
+    const result = await checkReadiness();
+
+    expect(isCoreInfrastructureReady(result)).toBe(false);
+  });
+
+  it('returns true when every dependency, including HuggingFace/Groq, is ok', async () => {
+    const result = await checkReadiness();
+
+    expect(result.status).toBe('ok');
+    expect(isCoreInfrastructureReady(result)).toBe(true);
   });
 });

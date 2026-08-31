@@ -21,6 +21,13 @@ export interface CitationMarkerProps {
   onClick: (index: number) => void;
   /** Whether interactions are disabled (e.g., during streaming) */
   disabled?: boolean;
+  /**
+   * True when this marker's number has no corresponding source in the
+   * citations array (an LLM-hallucinated citation, e.g. [15] when only 5
+   * sources exist). Rendered as visually distinct and non-interactive —
+   * there is no card to jump to.
+   */
+  isHallucinated?: boolean;
 }
 
 /**
@@ -39,37 +46,76 @@ export function CitationMarker({
   onLeave,
   onClick,
   disabled = false,
+  isHallucinated = false,
 }: CitationMarkerProps): React.JSX.Element {
+  // A hallucinated citation number has no matching source card — treat it as
+  // non-interactive the same way a disabled (streaming) marker is, rather
+  // than wiring up handlers that silently no-op on click/hover.
+  const interactive = !disabled && !isHallucinated;
+
   const handleMouseEnter = useCallback(() => {
-    if (!disabled) onEnter(index);
-  }, [disabled, onEnter, index]);
+    if (interactive) onEnter(index);
+  }, [interactive, onEnter, index]);
 
   const handleMouseLeave = useCallback(() => {
-    if (!disabled) onLeave();
-  }, [disabled, onLeave]);
+    if (interactive) onLeave();
+  }, [interactive, onLeave]);
 
   const handleClick = useCallback(() => {
-    if (!disabled) onClick(index);
-  }, [disabled, onClick, index]);
+    if (interactive) onClick(index);
+  }, [interactive, onClick, index]);
 
   const handleFocus = useCallback(() => {
-    if (!disabled) onEnter(index);
-  }, [disabled, onEnter, index]);
+    if (interactive) onEnter(index);
+  }, [interactive, onEnter, index]);
 
   const handleBlur = useCallback(() => {
-    if (!disabled) onLeave();
-  }, [disabled, onLeave]);
+    if (interactive) onLeave();
+  }, [interactive, onLeave]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      if (disabled) return;
+      if (!interactive) return;
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         onClick(index);
       }
     },
-    [disabled, onClick, index],
+    [interactive, onClick, index],
   );
+
+  if (isHallucinated) {
+    // Visually distinct (amber, dashed ring via boxShadow) and
+    // non-interactive — no card exists at this number to jump to.
+    return (
+      <sup
+        data-testid={`citation-marker-${index}`}
+        aria-label={`Citation ${index} — source not found`}
+        title="This citation number doesn't match any source"
+        style={{
+          background: '#B8860B',
+          color: '#fff',
+          fontFamily: "'Space Mono', monospace",
+          fontSize: '11px',
+          fontWeight: 700,
+          lineHeight: 1,
+          borderRadius: '50%',
+          minWidth: '16px',
+          height: '16px',
+          padding: '0 3px',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          verticalAlign: 'super',
+          margin: '0 2px',
+          opacity: 0.7,
+          cursor: 'help',
+        }}
+      >
+        {index}
+      </sup>
+    );
+  }
 
   if (disabled) {
     // Non-interactive rendering during streaming
@@ -102,6 +148,7 @@ export function CitationMarker({
   return (
     <sup
       data-testid={`citation-marker-${index}`}
+      className="group"
       role="button"
       aria-label={`Citation ${index} — click to jump to source`}
       tabIndex={0}

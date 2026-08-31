@@ -81,27 +81,25 @@ export async function addDocumentJob(data: DocumentJobData): Promise<string> {
 }
 
 /**
- * Retries the in-process abort briefly for a job that's active in Redis but has no
- * registered AbortController yet — a narrow startup race where the worker has claimed
- * the job but hasn't reached beginAttempt(). Without this retry, the worker would fully
- * process (and write chunks for) a document that's about to be deleted.
+ * Aborts the AbortController registered for a job Redis reports as 'active'.
+ * documentWorker registers that controller synchronously from the worker's
+ * `'active'` event handler — which BullMQ fires before the job's processor
+ * function ever runs — so by the time `getState()` can observe 'active', a
+ * controller is already guaranteed to be registered. No retry/polling is
+ * needed: closing the race at its source (registering on the event instead
+ * of at the top of the processor body) removes the window a poll would have
+ * papered over.
  * @param documentId - Document UUID, equal to the BullMQ job ID
  */
-async function cancelActiveJobWithRetry(documentId: string): Promise<void> {
-  const retryDelaysMs = [50, 150, 300];
-  for (const delayMs of retryDelaysMs) {
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-    if (cancelInFlightAttempt(documentId)) {
-      logger.info('Cancelled active document job after registration race retry', {
-        documentId,
-        delayMs,
-      });
-      return;
-    }
+function cancelActiveJob(documentId: string): void {
+  if (cancelInFlightAttempt(documentId)) {
+    logger.info('Cancelled active document job', { documentId });
+    return;
   }
-  logger.warn('Active document job could not be aborted — no attempt controller registered', {
-    documentId,
-  });
+  // The job settled (completed/failed) between getState() reporting 'active'
+  // and this call — a harmless, narrow race where there is nothing left to
+  // cancel, not a failure to register.
+  logger.info('Active document job had already settled — nothing to cancel', { documentId });
 }
 
 /**
@@ -137,7 +135,7 @@ export async function cancelDocumentJob(documentId: string): Promise<void> {
   }
 
   if (state === 'active') {
-    await cancelActiveJobWithRetry(documentId);
+    cancelActiveJob(documentId);
   }
 }
 

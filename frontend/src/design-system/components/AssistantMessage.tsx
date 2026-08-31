@@ -7,7 +7,13 @@
  * @created 2026-06-16
  */
 
-import React, { useState, useCallback, useMemo, useEffect, type ComponentPropsWithoutRef } from 'react';
+import React, {
+  useState,
+  useCallback,
+  useMemo,
+  useEffect,
+  type ComponentPropsWithoutRef,
+} from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ClipboardIcon as Clipboard, Check, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { StreamingCursor } from './StreamingCursor';
@@ -19,8 +25,14 @@ import type { MessageFeedback } from '../../stores/ragStore';
 import { useCitationHighlight } from '../../hooks/useCitationHighlight';
 import { useChatLayout } from '../../contexts/ChatLayoutContext';
 import { parseCitationText } from '../../utils/parseCitationText';
-import { formatAnswerMarkdown, copyToClipboard, type Citation as FormatCitation } from '../../utils/formatAnswerMarkdown';
+import {
+  formatAnswerMarkdown,
+  copyToClipboard,
+  type Citation as FormatCitation,
+} from '../../utils/formatAnswerMarkdown';
+import { formatMessageTime as formatTime } from '../../utils/formatMessageTime';
 import { useAppToast } from '../../contexts/ToastContext';
+import { citationsEqual } from '../../utils/chatCitations';
 import type { ChatCitation } from './ChatMessage';
 
 /** Maximum number of IndexCards visible before "+ N more" link */
@@ -55,18 +67,10 @@ export interface AssistantMessageProps {
   onFeedback?: (feedback: MessageFeedback) => void;
 }
 
-const formatTime = (iso?: string): string => {
-  if (!iso) return '';
-  try {
-    return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  } catch {
-    return '';
-  }
-};
-
 interface MarkdownCitationState {
   activeCitation: number | null;
   handlers: import('../../utils/parseCitationText').ParseCitationTextHandlers;
+  citationCount: number;
 }
 
 /**
@@ -80,6 +84,7 @@ interface MarkdownCitationState {
 const MarkdownCitationContext = React.createContext<MarkdownCitationState>({
   activeCitation: null,
   handlers: { onEnter: () => {}, onLeave: () => {}, onClick: () => {} },
+  citationCount: 0,
 });
 
 /**
@@ -89,7 +94,7 @@ const MarkdownCitationContext = React.createContext<MarkdownCitationState>({
  * @param children - React children from a ReactMarkdown element renderer
  */
 function CitationText({ children }: { children: React.ReactNode }): React.JSX.Element {
-  const { activeCitation, handlers } = React.useContext(MarkdownCitationContext);
+  const { activeCitation, handlers, citationCount } = React.useContext(MarkdownCitationContext);
   return (
     <>
       {React.Children.map(children, (child, i) =>
@@ -97,7 +102,7 @@ function CitationText({ children }: { children: React.ReactNode }): React.JSX.El
           ? React.createElement(
               React.Fragment,
               { key: `citation-text-${i}` },
-              ...parseCitationText(child, activeCitation, handlers, false),
+              ...parseCitationText(child, activeCitation, handlers, false, citationCount),
             )
           : child,
       )}
@@ -148,11 +153,7 @@ function FeedbackButtons({ feedback, onFeedback }: FeedbackButtonsProps): React.
   const notHelpfulActive = feedback === 'not_helpful';
 
   return (
-    <div
-      className="mt-ds-3 flex items-center gap-2"
-      role="group"
-      aria-label="Rate this answer"
-    >
+    <div className="mt-ds-3 flex items-center gap-2" role="group" aria-label="Rate this answer">
       <span
         style={{
           fontFamily: "'Space Mono', monospace",
@@ -250,18 +251,25 @@ function AssistantMessageImpl({
   const layout = useChatLayout();
 
   // In split-screen mode, use context-level citation handlers for cross-panel sync
-  const activeCitation = layout.splitScreenEnabled ? layout.activeCitation : localHighlight.activeCitation;
-  const onCitationEnter = layout.splitScreenEnabled ? layout.onCitationEnter : localHighlight.onCitationEnter;
+  const activeCitation = layout.splitScreenEnabled
+    ? layout.activeCitation
+    : localHighlight.activeCitation;
+  const onCitationEnter = layout.splitScreenEnabled
+    ? layout.onCitationEnter
+    : localHighlight.onCitationEnter;
   const onLeave = layout.splitScreenEnabled ? layout.onCitationLeave : localHighlight.onLeave;
-  const onCitationClick = layout.splitScreenEnabled ? layout.onCitationClick : localHighlight.onCitationClick;
+  const onCitationClick = layout.splitScreenEnabled
+    ? layout.onCitationClick
+    : localHighlight.onCitationClick;
   const cardRefs = localHighlight.cardRefs;
 
   const citationContextValue = useMemo<MarkdownCitationState>(
     () => ({
       activeCitation,
       handlers: { onEnter: onCitationEnter, onLeave, onClick: onCitationClick },
+      citationCount: citations.length,
     }),
-    [activeCitation, onCitationEnter, onLeave, onCitationClick],
+    [activeCitation, onCitationEnter, onLeave, onCitationClick, citations.length],
   );
 
   // Deps are all referentially stable (useCallback/context), so this object
@@ -290,11 +298,15 @@ function AssistantMessageImpl({
       ),
       // Ordered list
       ol: ({ children }: ComponentPropsWithoutRef<'ol'>) => (
-        <ol style={{ paddingLeft: '1.5em', marginBottom: '0.5em', listStyleType: 'decimal' }}>{children}</ol>
+        <ol style={{ paddingLeft: '1.5em', marginBottom: '0.5em', listStyleType: 'decimal' }}>
+          {children}
+        </ol>
       ),
       // Unordered list
       ul: ({ children }: ComponentPropsWithoutRef<'ul'>) => (
-        <ul style={{ paddingLeft: '1.5em', marginBottom: '0.5em', listStyleType: 'disc' }}>{children}</ul>
+        <ul style={{ paddingLeft: '1.5em', marginBottom: '0.5em', listStyleType: 'disc' }}>
+          {children}
+        </ul>
       ),
       // List item
       li: ({ children }: ComponentPropsWithoutRef<'li'>) => (
@@ -317,7 +329,9 @@ function AssistantMessageImpl({
               overflowX: 'auto',
               marginBottom: '0.5em',
             }}
-          >{children}</code>
+          >
+            {children}
+          </code>
         ) : (
           <code
             style={{
@@ -327,17 +341,25 @@ function AssistantMessageImpl({
               fontFamily: "'Space Mono', monospace",
               fontSize: '0.88em',
             }}
-          >{children}</code>
+          >
+            {children}
+          </code>
         ),
       // Headings
       h1: ({ children }: ComponentPropsWithoutRef<'h1'>) => (
-        <h3 style={{ fontWeight: 700, fontSize: '1em', marginBottom: '0.3em', marginTop: '0.8em' }}>{children}</h3>
+        <h3 style={{ fontWeight: 700, fontSize: '1em', marginBottom: '0.3em', marginTop: '0.8em' }}>
+          {children}
+        </h3>
       ),
       h2: ({ children }: ComponentPropsWithoutRef<'h2'>) => (
-        <h3 style={{ fontWeight: 700, fontSize: '1em', marginBottom: '0.3em', marginTop: '0.8em' }}>{children}</h3>
+        <h3 style={{ fontWeight: 700, fontSize: '1em', marginBottom: '0.3em', marginTop: '0.8em' }}>
+          {children}
+        </h3>
       ),
       h3: ({ children }: ComponentPropsWithoutRef<'h3'>) => (
-        <h3 style={{ fontWeight: 700, fontSize: '1em', marginBottom: '0.3em', marginTop: '0.8em' }}>{children}</h3>
+        <h3 style={{ fontWeight: 700, fontSize: '1em', marginBottom: '0.3em', marginTop: '0.8em' }}>
+          {children}
+        </h3>
       ),
       // Blockquote
       blockquote: ({ children }: ComponentPropsWithoutRef<'blockquote'>) => (
@@ -349,10 +371,14 @@ function AssistantMessageImpl({
             fontStyle: 'italic',
             marginBottom: '0.5em',
           }}
-        >{children}</blockquote>
+        >
+          {children}
+        </blockquote>
       ),
       // Horizontal rule
-      hr: () => <hr style={{ border: 'none', borderTop: '1px solid #D8D4C8', margin: '0.8em 0' }} />,
+      hr: () => (
+        <hr style={{ border: 'none', borderTop: '1px solid #D8D4C8', margin: '0.8em 0' }} />
+      ),
     }),
     [],
   );
@@ -393,7 +419,9 @@ function AssistantMessageImpl({
   const { registerLastMessageCopyHandler } = layout;
   useEffect(() => {
     if (!isLastCompletedMessage) return undefined;
-    registerLastMessageCopyHandler(() => { void handleCopy(); });
+    registerLastMessageCopyHandler(() => {
+      void handleCopy();
+    });
     return () => registerLastMessageCopyHandler(null);
   }, [isLastCompletedMessage, registerLastMessageCopyHandler, handleCopy]);
 
@@ -464,9 +492,7 @@ function AssistantMessageImpl({
           ) : (
             <div className="text-ds-base font-body text-ds-text-primary leading-ds-relaxed pr-6 prose-answer">
               <MarkdownCitationContext.Provider value={citationContextValue}>
-                <ReactMarkdown components={markdownComponents}>
-                  {content}
-                </ReactMarkdown>
+                <ReactMarkdown components={markdownComponents}>{content}</ReactMarkdown>
               </MarkdownCitationContext.Provider>
             </div>
           )}
@@ -475,31 +501,31 @@ function AssistantMessageImpl({
         {/* IndexCard grid — capped at 3 visible, "+ N more" link */}
         {/* Hidden in split-screen mode (cards shown in SourcePanel instead) */}
         {citations.length > 0 && !layout.hideIndexCards && (
-          <div
-            className="mt-ds-4"
-            aria-label="Retrieved source cards"
-          >
+          <div className="mt-ds-4" aria-label="Retrieved source cards">
             <div
               className="grid gap-ds-3"
               style={{
                 gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
               }}
             >
-              {citations.slice(0, showAllCards ? citations.length : MAX_VISIBLE_CARDS).map((c, i) => (
-                <IndexCard
-                  key={c.id}
-                  documentName={c.documentName}
-                  chunkText={c.fullText ?? c.chunkRef}
-                  relevanceScore={c.relevanceScore}
-                  chunkRef={c.chunkRef}
-                  index={i}
-                  citationIndex={i + 1}
-                  isActive={activeCitation === i + 1}
-                  onEnter={onCitationEnter}
-                  onLeave={onLeave}
-                  cardRef={(el) => cardRefs.current.set(i + 1, el)}
-                />
-              ))}
+              {citations
+                .slice(0, showAllCards ? citations.length : MAX_VISIBLE_CARDS)
+                .map((c, i) => (
+                  <IndexCard
+                    key={c.id}
+                    documentName={c.documentName}
+                    chunkText={c.fullText ?? c.chunkRef}
+                    relevanceScore={c.relevanceScore}
+                    chunkRef={c.chunkRef}
+                    index={i}
+                    citationIndex={c.citationNumber}
+                    isActive={activeCitation === c.citationNumber}
+                    onEnter={onCitationEnter}
+                    onLeave={onLeave}
+                    onTouch={localHighlight.onCardTouch}
+                    cardRef={(el) => cardRefs.current.set(c.citationNumber, el)}
+                  />
+                ))}
             </div>
 
             {/* "+ N more" link when cards are truncated */}
@@ -535,10 +561,7 @@ function AssistantMessageImpl({
 
         {/* Relevance timeline — collapsed by default, hidden in split mode */}
         {!isStreaming && citations.length > 0 && !layout.hideTimeline && (
-          <RelevanceTimeline
-            citations={citations}
-            isStreaming={isStreaming}
-          />
+          <RelevanceTimeline citations={citations} isStreaming={isStreaming} />
         )}
 
         {/* Feedback buttons — only once the answer has finished streaming and
@@ -549,47 +572,15 @@ function AssistantMessageImpl({
 
         {/* Re-query buttons — show after streaming completes, only on last assistant message */}
         {!isStreaming && sourceQuery && onReQuery && (
-          <ReQueryButtons
-            originalQuery={sourceQuery}
-            onReQuery={onReQuery}
-          />
+          <ReQueryButtons originalQuery={sourceQuery} onReQuery={onReQuery} />
         )}
 
         {timestamp && (
-          <p className="text-ds-xs font-mono text-ds-text-muted mt-1">
-            {formatTime(timestamp)}
-          </p>
+          <p className="text-ds-xs font-mono text-ds-text-muted mt-1">{formatTime(timestamp)}</p>
         )}
       </div>
     </div>
   );
-}
-
-/**
- * Shallow-by-value comparison of two citation arrays. The parent
- * (Chat.tsx) rebuilds the `citations` array with a fresh `.map(...)` on
- * every render, so a reference check would always report "changed" even
- * when nothing meaningful did. Comparing length + each field catches real
- * content changes while ignoring the parent's incidental re-allocation.
- * @param a - Previous citations array
- * @param b - Next citations array
- * @returns True if the arrays are equivalent in content
- */
-function citationsEqual(a: ChatCitation[], b: ChatCitation[]): boolean {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  return a.every((citation, i) => {
-    const other = b[i];
-    return (
-      other !== undefined &&
-      citation.id === other.id &&
-      citation.documentName === other.documentName &&
-      citation.chunkRef === other.chunkRef &&
-      citation.relevanceScore === other.relevanceScore &&
-      citation.fullText === other.fullText &&
-      citation.chunkIndex === other.chunkIndex
-    );
-  });
 }
 
 /**
