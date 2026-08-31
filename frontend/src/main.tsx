@@ -8,6 +8,8 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ClerkProvider } from '@clerk/clerk-react';
+import { Analytics } from '@vercel/analytics/react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import './index.css';
 import App from './App';
 
@@ -27,6 +29,8 @@ createRoot(rootElement).render(
   <StrictMode>
     <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
       <App />
+      <Analytics />
+      <SpeedInsights />
     </ClerkProvider>
   </StrictMode>,
 );

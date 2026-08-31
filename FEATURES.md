@@ -735,6 +735,13 @@ How it works:
 - Error visibility today comes from Winston structured JSON logs (§10.2) with a correlation ID on every request (`middleware/correlationId.ts`), searchable in whatever log aggregation the hosting platform provides (e.g. Render's built-in log viewer) — sufficient for a free-tier deployment's actual operational needs without a dedicated APM product.
 - If a Sentry (or similar) account is added later, wiring it in is small and additive: an optional `SENTRY_DSN` env var (Zod `.optional()`, so its absence changes nothing), a conditional `Sentry.init()` call only when set, and a report call added to the existing central error handler (`middleware/errorHandler.ts`) — a follow-up task, not a redesign.
 
+### 10.7 Frontend Analytics & Speed Insights
+Status: ✅
+
+How it works:
+- `@vercel/analytics` and `@vercel/speed-insights` are mounted in `frontend/src/main.tsx`, rendered alongside `<App />` inside `ClerkProvider`, using the framework-agnostic `/react` entry points (`@vercel/analytics/react`, `@vercel/speed-insights/react`) rather than the Next.js-specific `/next` entry points, since the frontend is a Vite SPA, not Next.js.
+- `<Analytics />` collects pageview/visit data; `<SpeedInsights />` collects Core Web Vitals — both no-op with a console warning when the app isn't served from Vercel (e.g. local dev), and report automatically in the production deploy, since the frontend is already hosted on Vercel (§12.2). No env var or API key is required.
+
 ---
 
 ## 11. Environment Variables
