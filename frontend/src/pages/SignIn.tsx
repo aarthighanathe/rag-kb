@@ -8,7 +8,7 @@
 
 import React from 'react';
 import { SignIn } from '@clerk/clerk-react';
-import { BookOpen } from 'lucide-react';
+import { LuminaMark } from '../design-system/components/LuminaMark';
 import { ink, paper, stamp, fontFamily } from '../design-system/tokens';
 
 export function SignInPage(): React.JSX.Element {
@@ -34,7 +34,7 @@ export function SignInPage(): React.JSX.Element {
             marginBottom: '6px',
           }}
         >
-          <BookOpen size={22} aria-hidden="true" style={{ color: ink.base }} />
+          <LuminaMark size={22} />
           <span
             style={{
               fontFamily: fontFamily.display,

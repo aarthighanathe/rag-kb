@@ -17,8 +17,8 @@
 import React from 'react';
 import { Link, useNavigate, Navigate } from 'react-router-dom';
 import { useAuth } from '@clerk/clerk-react';
+import { LuminaMark } from '../design-system/components/LuminaMark';
 import {
-  BookOpen,
   Columns2,
   HelpCircle,
   Copy,
@@ -84,7 +84,7 @@ function LandingNav(): React.JSX.Element {
         className="flex items-center gap-2 focus-visible:outline-none"
         style={{ textDecoration: 'none' }}
       >
-        <BookOpen size={16} aria-hidden="true" style={{ color: C.paperBase }} />
+        <LuminaMark size={16} />
         <span
           className="font-display font-black"
           style={{ fontSize: '20px', color: C.paperBase, fontVariationSettings: "'opsz' 10" }}

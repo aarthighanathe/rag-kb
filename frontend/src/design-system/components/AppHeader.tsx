@@ -1,7 +1,7 @@
 /**
  * @file AppHeader.tsx
  * @description Shared horizontal header for interior app routes (Upload / Chat / Documents).
- *   Dark ink.base (#1C1B19) bar, 50px tall. Left: BookOpen icon + "Lumina" wordmark.
+ *   Dark ink.base (#1C1B19) bar, 50px tall. Left: LuminaMark + "Lumina" wordmark.
  *   Vertical divider. Three tab links — inactive: ink.muted, active: stamp.red + 2px bottom bar.
  *   Mobile (<640px): icon-only with aria-label.
  * @author [Author Placeholder]
@@ -11,7 +11,8 @@
 import React, { useRef, useCallback } from 'react';
 import { NavLink } from 'react-router-dom';
 import { UserButton } from '@clerk/clerk-react';
-import { BookOpen, Upload, MessageSquare, FolderOpen } from 'lucide-react';
+import { Upload, MessageSquare, FolderOpen } from 'lucide-react';
+import { LuminaMark } from './LuminaMark';
 
 interface TabDef {
   to: string;
@@ -88,7 +89,7 @@ export function AppHeader(): React.JSX.Element {
         className="flex items-center gap-2 px-4 sm:px-5 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset"
         style={{ focusVisibleOutlineColor: '#FF4D2E' } as React.CSSProperties}
       >
-        <BookOpen size={18} aria-hidden="true" style={{ color: '#FCFBF8' }} />
+        <LuminaMark size={18} />
         <span
           className="font-display font-black"
           style={{

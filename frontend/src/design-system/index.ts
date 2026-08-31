@@ -59,3 +59,6 @@ export { Select } from './components/Select';
 export type { SelectProps, SelectOption } from './components/Select';
 
 export { AppHeader } from './components/AppHeader';
+
+export { LuminaMark } from './components/LuminaMark';
+export type { LuminaMarkProps } from './components/LuminaMark';
