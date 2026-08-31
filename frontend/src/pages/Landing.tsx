@@ -1,12 +1,14 @@
 /**
  * @file Landing.tsx
- * @description Marketing landing page — eight-section full-bleed layout that
+ * @description Marketing landing page — nine-section full-bleed layout that
  *   showcases the full feature set (retrieval, citations, confidence scoring,
- *   split-screen mode, document relationship map, export, history, shortcuts).
+ *   split-screen mode, document relationship map, tagging, duplicate detection,
+ *   answer feedback, export, history, shortcuts, security).
  *   Section 1: Minimal nav. Section 2: 50/50 hero split with a static chat mock.
  *   Section 3: Ticker bar. Section 4: "THE DIFFERENCE" before/after comparison
- *   (3 rows). Section 5: Three-step panels. Section 6: Split-screen showcase.
- *   Section 7: Stats bar. Section 8: Footer CTA.
+ *   (3 rows). Section 4a: Full feature grid (12 tiles covering everything not
+ *   already called out elsewhere). Section 5: Three-step panels. Section 6:
+ *   Split-screen showcase. Section 7: Stats bar. Section 8: Footer CTA.
  *   No AppHeader (standalone minimal nav). Sharp corners throughout.
  * @author [Author Placeholder]
  * @created 2026-06-16
@@ -24,6 +26,16 @@ import {
   ChevronDown,
   ArrowRight,
   ShieldCheck,
+  Tags,
+  Network,
+  ThumbsUp,
+  Search,
+  Sparkles,
+  Keyboard,
+  History,
+  Repeat,
+  FileScan,
+  ShieldAlert,
 } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
@@ -555,6 +567,9 @@ const TICKER_ITEMS = [
   'Document relationship map',
   'Export answers as Markdown',
   'Query history with one-click re-run',
+  'Hybrid vector + keyword search',
+  'Auto-tagging and duplicate detection',
+  'Answer feedback and re-query variants',
   '100% free in production',
 ];
 
@@ -820,6 +835,161 @@ function DifferenceSection(): React.JSX.Element {
         >
           See all features →
         </a>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Section 4a: Full feature grid — everything else the app ships
+// ---------------------------------------------------------------------------
+
+interface FeatureGridItem {
+  icon: React.ComponentType<{ size?: number; color?: string; 'aria-hidden'?: boolean }>;
+  title: string;
+  body: string;
+}
+
+const FEATURE_GRID_ITEMS: FeatureGridItem[] = [
+  {
+    icon: Search,
+    title: 'Hybrid search & re-ranking',
+    body: 'Vector similarity and keyword matching run in parallel, then a local re-ranker blends both scores — no chunk falls through just because it wasn’t a strong semantic match.',
+  },
+  {
+    icon: Network,
+    title: 'Document relationship map',
+    body: 'A force-directed graph shows which documents overlap in content, computed from real chunk-level similarity — click a node to see everything it relates to.',
+  },
+  {
+    icon: Tags,
+    title: 'Auto-tagging',
+    body: 'Documents are tagged automatically from their own detected section headings during processing — no extra pass, no manual setup. Edit or add tags anytime.',
+  },
+  {
+    icon: FileScan,
+    title: 'Duplicate detection',
+    body: 'Byte-identical re-uploads are flagged instantly via content hashing. Near-duplicate documents — different files, near-identical content — surface a review banner.',
+  },
+  {
+    icon: ThumbsUp,
+    title: 'Answer feedback',
+    body: 'Rate any completed answer helpful or not — captured against the exact query and citations that produced it, for tracking answer quality over time.',
+  },
+  {
+    icon: Repeat,
+    title: 'One-click re-query',
+    body: 'Turn any answer into a 3-bullet summary, a beginner-friendly explanation, or a key-takeaways list with a single click — no retyping the question.',
+  },
+  {
+    icon: Sparkles,
+    title: 'Content-aware suggestions',
+    body: 'Empty-state prompts are pulled from real section headings in your own documents, not generic placeholders — so the first question is never a guess.',
+  },
+  {
+    icon: History,
+    title: 'Searchable query history',
+    body: 'Every question you’ve ever asked is durably logged and full-text searchable, not just the last 10 kept locally in the browser.',
+  },
+  {
+    icon: Keyboard,
+    title: 'Full keyboard control',
+    body: 'Focus the query box, send, export, copy the last answer, or toggle history — all without leaving the keyboard. Ctrl+K, Ctrl+Enter, Ctrl+Shift+E, Ctrl+H.',
+  },
+  {
+    icon: ShieldAlert,
+    title: 'Prompt-injection filtering',
+    body: 'Every query is screened for injection patterns before it reaches the model — high-risk queries are rejected, medium-risk ones are sanitized in place.',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Private, per-account isolation',
+    body: 'Google sign-in via Clerk. Every document, chunk, and query is scoped to your account at the database layer — never visible to another user, even by guessing an ID.',
+  },
+  {
+    icon: Columns2,
+    title: 'Magic-byte file validation',
+    body: 'Uploads are verified by their actual file header, not just their extension, with zip-bomb detection on DOCX files — a renamed file can’t sneak through.',
+  },
+];
+
+function FeatureGridSection(): React.JSX.Element {
+  return (
+    <section
+      data-testid="feature-grid-section"
+      style={{ background: C.paperDeep, flexShrink: 0 }}
+      className="px-5 py-10 md:px-10 md:py-14"
+      aria-labelledby="feature-grid-heading"
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '40px' }}>
+        <span
+          id="feature-grid-heading"
+          style={{
+            fontFamily: FONT_MONO,
+            fontSize: '10px',
+            color: C.stampRed,
+            letterSpacing: '0.14em',
+            textTransform: 'uppercase',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          EVERYTHING ELSE IN THE ARCHIVE
+        </span>
+        <div style={{ flex: 1, height: '1px', background: C.paperBorder }} />
+      </div>
+
+      <div
+        style={{ display: 'grid', gap: '1px', background: C.paperBorder }}
+        className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+      >
+        {FEATURE_GRID_ITEMS.map((item) => {
+          const Icon = item.icon;
+          return (
+            <div
+              key={item.title}
+              data-testid="feature-grid-item"
+              style={{ background: C.white, padding: '24px' }}
+            >
+              <div
+                aria-hidden="true"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '36px',
+                  height: '36px',
+                  background: C.paperMuted,
+                  marginBottom: '14px',
+                }}
+              >
+                <Icon size={17} color={C.archiveGreen} aria-hidden />
+              </div>
+              <h3
+                className="font-display"
+                style={{
+                  fontSize: '17px',
+                  fontWeight: 700,
+                  fontStyle: 'italic',
+                  color: C.inkBase,
+                  marginBottom: '8px',
+                  lineHeight: 1.3,
+                }}
+              >
+                {item.title}
+              </h3>
+              <p
+                style={{
+                  fontFamily: FONT_BODY,
+                  fontSize: '13.5px',
+                  color: C.inkSecondary,
+                  lineHeight: 1.6,
+                }}
+              >
+                {item.body}
+              </p>
+            </div>
+          );
+        })}
       </div>
     </section>
   );
@@ -1535,6 +1705,7 @@ export function Landing(): React.JSX.Element {
       <HeroSection />
       <TickerBar />
       <DifferenceSection />
+      <FeatureGridSection />
       <ThreeStepSection />
       <ShowcaseSection />
       <StatsBar />
